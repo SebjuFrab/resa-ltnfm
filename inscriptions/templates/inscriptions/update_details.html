@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Modifier le groupe — LTNM{% endblock %}
+{% block content %}
+<h1>Modifier les informations</h1>
+<p>L’établissement et le jour de visite ne peuvent pas être changés depuis ce lien.</p>
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  {{ form.as_p }}
+  <div class="actions">
+    <button type="submit">Enregistrer</button>
+    <a class="button button-secondary" href="{% url 'registration-manage' %}">Annuler</a>
+  </div>
+</form>
+{% endblock %}
+

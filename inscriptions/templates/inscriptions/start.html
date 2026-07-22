@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Inscrire un groupe — LTNM{% endblock %}
+{% block content %}
+<h1>Inscrire un groupe scolaire</h1>
+<p>Les inscriptions concernent des effectifs : aucun nom d’élève n’est demandé.</p>
+<p>Après cette étape, vous pourrez répartir les élèves entre les animations du jour choisi.</p>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  <fieldset>
+    <legend>Établissement</legend>
+    <p>{{ form.existing_institution.label_tag }} {{ form.existing_institution }} {{ form.existing_institution.errors }}<span class="helptext">{{ form.existing_institution.help_text }}</span></p>
+    <h2>Nouvel établissement</h2>
+    <p class="helptext">À remplir seulement si l’établissement n’est pas proposé ci-dessus.</p>
+    {% for field in form %}
+      {% if field.name|slice:':12' == 'institution_' and field.name != 'institution_choice' %}
+        <p>{{ field.label_tag }} {{ field }} {{ field.errors }}{% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}</p>
+      {% endif %}
+    {% endfor %}
+  </fieldset>
+  <fieldset>
+    <legend>Professeur référent</legend>
+    {% for field in form %}
+      {% if field.name|slice:':8' == 'teacher_' %}
+        <p>{{ field.label_tag }} {{ field }} {{ field.errors }}</p>
+      {% endif %}
+    {% endfor %}
+  </fieldset>
+  <fieldset>
+    <legend>Groupe</legend>
+    {% for field in form %}
+      {% if field.name|slice:':12' != 'institution_' and field.name|slice:':8' != 'teacher_' and field.name != 'existing_institution' %}
+        <p>{{ field.label_tag }} {{ field }} {{ field.errors }}{% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}</p>
+      {% endif %}
+    {% endfor %}
+  </fieldset>
+  <div class="actions"><button type="submit">Continuer vers le planning</button></div>
+</form>
+{% endblock %}
+

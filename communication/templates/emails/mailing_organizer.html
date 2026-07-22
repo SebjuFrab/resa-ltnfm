@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>{{ campaign.subject }}</title></head>
+<body>
+  <p>Bonjour{% if delivery.recipient_name %} {{ delivery.recipient_name }}{% endif %},</p>
+  <div>{{ campaign.body_html|safe }}</div>
+  <h2>Récapitulatif des groupes attendus</h2>
+  {% for session in snapshot.sessions %}
+    <h3>{{ session.date_label }} · {{ session.starts_at }}–{{ session.ends_at }} · {{ session.animation }}</h3>
+    <p>Lieu de rendez-vous : {{ session.location }}<br>Effectif total : <strong>{{ session.total_count }}</strong></p>
+    <table>
+      <thead><tr><th>Groupe</th><th>Établissement</th><th>Professeur</th><th>Effectif</th></tr></thead>
+      <tbody>
+        {% for group in session.groups %}
+          <tr>
+            <td>{{ group.group_code }}</td>
+            <td>{{ group.institution }}</td>
+            <td>{{ group.teacher_name }} — {{ group.teacher_email }}</td>
+            <td>{{ group.total_count }} ({{ group.student_count }} élèves + {{ group.chaperone_count }} accompagnateurs)</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% empty %}<p>Aucun groupe inscrit.</p>{% endfor %}
+</body>
+</html>

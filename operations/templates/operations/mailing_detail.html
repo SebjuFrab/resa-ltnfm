@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Publipostage {{ campaign.pk }} — LTNM{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Publipostage envoyé</p>
+  <h1>{{ campaign.subject }}</h1>
+  <p>Créé le {{ campaign.created_at|date:"d/m/Y à H:i" }}{% if campaign.created_by %} par {{ campaign.created_by }}{% endif %}.</p>
+  <div class="mail-preview">{{ campaign.body_html|safe }}</div>
+  <div class="cards metric-grid">
+    <article class="card"><h2>Envoyés</h2><p class="metric">{{ sent_count }}</p></article>
+    <article class="card"><h2>Échecs</h2><p class="metric">{{ failed_count }}</p></article>
+  </div>
+  <h2>Détail des destinataires</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Rôle</th><th>Destinataire</th><th>Statut</th><th>Erreur</th></tr></thead>
+    <tbody>{% for delivery in deliveries %}<tr><td>{{ delivery.get_recipient_kind_display }}</td><td>{{ delivery.recipient }}</td><td>{{ delivery.get_status_display }}</td><td>{{ delivery.error_summary|default:"—" }}</td></tr>{% empty %}<tr><td colspan="4">Aucun destinataire.</td></tr>{% endfor %}</tbody>
+  </table></div>
+{% endblock %}

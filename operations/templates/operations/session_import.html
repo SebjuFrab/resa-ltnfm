@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Importer des animations — LTNM{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Programme du salon</p>
+  <h1>Importer des animations</h1>
+  <p>Une ligne décrit une animation pour un jour. Indiquez plusieurs horaires séparés par des virgules si elle se répète dans la journée. Aucune donnée n'est enregistrée avant la confirmation de l'aperçu.</p>
+
+  {% if issues %}
+    <div class="alert alert-error" role="alert">
+      <h2>Le fichier contient des erreurs</h2>
+      <ul>
+        {% for issue in issues %}
+          <li>{% if issue.line %}Ligne {{ issue.line }} : {% endif %}{{ issue.message }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if preview.is_valid %}
+    <h2>Aperçu — {{ preview.rows|length }} créneau{{ preview.rows|length|pluralize }}</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Ligne</th><th scope="col">Animation</th><th scope="col">Jour</th>
+            <th scope="col">Horaire</th><th scope="col">Durée</th><th scope="col">Lieu de RDV</th><th scope="col">Jauge</th>
+            <th scope="col">Responsable</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview.rows %}
+            <tr>
+              <td>{{ row.line }}</td><td>{{ row.animation_title }}</td><td>{{ row.date|date:"d/m/Y" }}</td>
+              <td>{{ row.starts_at|time:"H:i" }}–{{ row.ends_at|time:"H:i" }}</td><td>{{ row.duration_minutes }} min</td>
+              <td>{{ row.location }}</td><td>{{ row.max_capacity }}</td>
+              <td>{{ row.organizer|default:"—" }}{% if row.organizer_email %}<br>{{ row.organizer_email }}{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="actions">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="confirm">
+        <button type="submit">Confirmer l'import</button>
+      </form>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="cancel">
+        <button class="button-secondary" type="submit">Abandonner</button>
+      </form>
+    </div>
+  {% else %}
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button type="submit">Vérifier le fichier</button>
+    </form>
+
+    <h2>Colonnes attendues</h2>
+    <p>
+      <a class="button button-secondary" href="{% url 'operations:session-import-template' %}">
+        Télécharger le modèle CSV
+      </a>
+    </p>
+    <p><code>titre_animation;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable</code></p>
+    <p>Les six premières colonnes sont obligatoires. <code>responsable</code> et <code>email_responsable</code> sont facultatives mais nécessaires pour le publipostage final.</p>
+    <h3>Exemple</h3>
+    <pre><code>titre_animation;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable
+La vie du sol;Pôle sols;45;30;mercredi;"09:00, 10:15, 14:00";Marie Martin;marie@example.org</code></pre>
+    <p>La durée accepte par exemple <code>45</code>, <code>45 min</code>, <code>1h</code> ou <code>1h30</code>. Une animation absente du catalogue sera créée automatiquement.</p>
+  {% endif %}
+
+  <p><a href="{% url 'operations:dashboard' %}">Retour au tableau de bord</a></p>
+{% endblock %}

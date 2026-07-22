@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Modification de votre inscription</title></head>
+<body>
+  <h1>Inscription modifiée</h1>
+  <p>Bonjour {{ registration.teacher.first_name }} {{ registration.teacher.last_name }},</p>
+  <p>Vos modifications ont bien été enregistrées.</p>
+  <dl>
+    <dt>Établissement</dt><dd>{{ registration.institution.name }}</dd>
+    <dt>Groupe</dt><dd>{{ registration.group_name }}</dd>
+    <dt>Code du groupe</dt><dd><strong>{{ group_code }}</strong></dd>
+    <dt>Effectif total</dt><dd>{{ total_count }} — {{ registration.student_count }} élèves et {{ registration.chaperone_count }} accompagnateurs</dd>
+    <dt>Jour de visite</dt><dd>{{ registration.visit_date|date:"l j F Y" }}</dd>
+    <dt>Référence</dt><dd>{{ registration.reference }}</dd>
+  </dl>
+  <h2>Programme mis à jour</h2>
+  <ul>
+    {% for reservation in reservations %}
+      <li>
+        <strong>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }} — {{ reservation.session.animation.title }}</strong><br>
+        {{ reservation.session.location }} — {{ reservation.total_participant_count }} personnes ({{ reservation.student_count }} élèves + {{ reservation.chaperone_count }} professeurs/accompagnateurs)
+        {% if reservation.session.animation.instructions %}<br>Consignes : {{ reservation.session.animation.instructions }}{% endif %}
+      </li>
+    {% empty %}<li>Aucune séance réservée.</li>{% endfor %}
+  </ul>
+  {% if edit_url %}
+    <p><a href="{{ edit_url }}">Consulter ou modifier mon inscription</a></p>
+    <p>Les modifications sont possibles jusqu'au {{ edit_deadline|date:"d/m/Y \u00e0 H:i" }}.</p>
+  {% endif %}
+  <p>Contact : <a href="mailto:{{ organization_email }}">{{ organization_email }}</a>{% if organization_phone %} — {{ organization_phone }}{% endif %}</p>
+</body>
+</html>

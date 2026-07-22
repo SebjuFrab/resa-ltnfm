@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Ouverture de votre inscription — LTNM{% endblock %}
+{% block content %}
+<h1>Ouverture de votre inscription</h1>
+<p id="token-status">Vérification du lien sécurisé en cours…</p>
+<form method="post" id="token-form">
+  {% csrf_token %}
+  <input type="hidden" name="token" id="token-value">
+  <noscript>
+    <p class="alert alert-warning">JavaScript est nécessaire pour ouvrir ce lien sans exposer son jeton dans les journaux du serveur. Contactez l’organisation si vous ne pouvez pas l’activer.</p>
+  </noscript>
+</form>
+<script>
+(() => {
+  const token = window.location.hash.slice(1);
+  const status = document.getElementById("token-status");
+  if (!token) {
+    status.textContent = "Ce lien est incomplet. Utilisez le lien entier reçu par courriel.";
+    status.className = "alert alert-error";
+    return;
+  }
+  document.getElementById("token-value").value = token;
+  history.replaceState(null, "", window.location.pathname);
+  document.getElementById("token-form").submit();
+})();
+</script>
+{% endblock %}

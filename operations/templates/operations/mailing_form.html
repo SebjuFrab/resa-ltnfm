@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Publipostage final — LTNM{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Communication de fin de préparation</p>
+  <h1>Préparer le publipostage</h1>
+  <p>Chaque professeur reçoit son récapitulatif personnalisé. Chaque responsable d’animation reçoit la liste des groupes attendus.</p>
+
+  <form method="post" novalidate id="mailing-form">
+    {% csrf_token %}
+    <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+    {{ form.non_field_errors }}
+    <fieldset>
+      <legend>Destinataires</legend>
+      <div class="form-grid form-grid-2">
+        <p>{{ form.visit_date.label_tag }} {{ form.visit_date }} {{ form.visit_date.errors }}</p>
+        <p>{{ form.family.label_tag }} {{ form.family }} {{ form.family.errors }}</p>
+      </div>
+      {% if preview %}
+        <p class="total-panel"><strong>{{ preview.teacher_count }}</strong> professeur(s) et <strong>{{ preview.organizer_count }}</strong> responsable(s) seront contactés.</p>
+        {% if preview.missing_teacher_email_count %}<p class="alert alert-warning"><strong>{{ preview.missing_teacher_email_count }}</strong> groupe(s) confirmé(s) n’ont pas d’adresse professeur valide et ne recevront pas le message.</p>{% endif %}
+        {% if preview.missing_organizer_email_count %}<p class="alert alert-warning"><strong>{{ preview.missing_organizer_email_count }}</strong> séance(s) réservée(s) n’ont pas d’adresse responsable et sont exclues du publipostage responsable.</p>{% endif %}
+        {% if preview.missing_teacher_email_count or preview.missing_organizer_email_count %}<p>{{ form.confirm_missing }} {{ form.confirm_missing.label_tag }} {{ form.confirm_missing.errors }}</p>{% endif %}
+      {% endif %}
+    </fieldset>
+    <fieldset>
+      <legend>Message général</legend>
+      <p>{{ form.subject.label_tag }} {{ form.subject }} {{ form.subject.errors }}</p>
+      {{ form.body_html.errors }}
+      <label id="editor-label">Contenu enrichi</label>
+      <div class="editor-toolbar" role="toolbar" aria-label="Mise en forme">
+        <button class="button button-quiet" type="button" data-command="bold"><strong>Gras</strong></button>
+        <button class="button button-quiet" type="button" data-command="italic"><em>Italique</em></button>
+        <button class="button button-quiet" type="button" data-command="insertUnorderedList">Liste</button>
+        <button class="button button-quiet" type="button" data-command="createLink">Lien</button>
+      </div>
+      <div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-labelledby="editor-label" aria-multiline="true">{{ editor_html|safe }}</div>
+      <div hidden>{{ form.body_html }}</div>
+      <p class="helptext">La mise en forme autorisée est nettoyée côté serveur avant tout envoi.</p>
+    </fieldset>
+    <div class="actions">
+      <button type="submit" name="action" value="preview">Actualiser l’aperçu</button>
+      <button type="submit" name="action" value="send">Envoyer les messages</button>
+    </div>
+  </form>
+
+  <script>
+  (() => {
+    const form = document.getElementById("mailing-form");
+    const editor = document.getElementById("rich-editor");
+    const input = document.getElementById("id_body_html");
+    document.querySelectorAll("[data-command]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const command = button.dataset.command;
+        const value = command === "createLink" ? window.prompt("Adresse du lien (https://…)") : null;
+        if (command !== "createLink" || value) document.execCommand(command, false, value);
+        editor.focus();
+      });
+    });
+    form.addEventListener("submit", () => { input.value = editor.innerHTML; });
+  })();
+  </script>
+{% endblock %}

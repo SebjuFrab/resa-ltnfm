@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Annuler {{ registration.group_code }} — LTNM{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Groupe {{ registration.group_code }}</p>
+  <h1>Annuler l’inscription</h1>
+  <p class="alert alert-warning">Cette action libérera toutes les places réservées et enverra un courriel à {{ registration.teacher.email }}.</p>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <p>{{ form.confirm }} {{ form.confirm.label_tag }} {{ form.confirm.errors }}</p>
+    <div class="actions">
+      <button class="button-danger" type="submit">Annuler définitivement</button>
+      <a class="button button-secondary" href="{% url 'operations:registration-detail' registration.reference %}">Conserver l’inscription</a>
+    </div>
+  </form>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Vérifier l’inscription — LTNM{% endblock %}
+{% block content %}
+<h1>Vérifier l’inscription</h1>
+<dl>
+  <dt>Établissement</dt><dd>{{ registration.institution.name }}</dd>
+  <dt>Professeur</dt><dd>{{ registration.teacher }}</dd>
+  <dt>Groupe</dt><dd>{{ registration.group_name }} — {{ registration.school_level }}</dd>
+  <dt>Effectif</dt><dd>{{ registration.student_count }} élèves et {{ registration.chaperone_count }} accompagnateurs</dd>
+  <dt>Jour</dt><dd>{{ registration.visit_date|date:"d/m/Y" }}</dd>
+</dl>
+
+<h2>Planning</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Horaire</th><th>Animation</th><th>Lieu</th><th>Élèves</th></tr></thead>
+    <tbody>
+      {% for reservation in reservations %}
+        <tr>
+          <td>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</td>
+          <td>{{ reservation.session.animation.title }}</td>
+          <td>{{ reservation.session.location }}</td>
+          <td>{{ reservation.student_count }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4">Aucune séance choisie. Choisissez au moins une séance avant de confirmer.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p>Les périodes sans animation sont autorisées. Les accompagnateurs ne consomment pas les places des séances.</p>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  <p>{{ form.confirm }} {{ form.confirm.label_tag }} {{ form.confirm.errors }}</p>
+  <div class="actions">
+    <button type="submit">Confirmer définitivement</button>
+    <a class="button button-secondary" href="{% url 'registration-planning' registration.reference %}">Modifier le planning</a>
+  </div>
+</form>
+{% endblock %}
+

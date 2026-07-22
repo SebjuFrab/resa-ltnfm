@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Gérer l’inscription — LTNM{% endblock %}
+{% block content %}
+<h1>Votre inscription</h1>
+<p>Référence : <strong>{{ registration.reference }}</strong></p>
+<p><strong>{{ registration.institution.name }} — {{ registration.group_name }}</strong><br>
+{{ registration.student_count }} élèves et {{ registration.chaperone_count }} accompagnateurs, le {{ registration.visit_date|date:"d/m/Y" }}.</p>
+
+{% if registration.status == "CANCELLED" %}
+  <p class="alert alert-warning">Cette inscription a été annulée. Les réservations ont été libérées.</p>
+{% elif not editable %}
+  <p class="alert alert-warning">Les modifications en ligne sont closes depuis le {{ edit_deadline|date:"d/m/Y à H:i" }}. Contactez l’organisation.</p>
+{% else %}
+  <div class="actions">
+    <a class="button" href="{% url 'registration-manage-details' %}">Modifier les informations</a>
+    <a class="button" href="{% url 'registration-manage-planning' %}">Modifier le planning</a>
+    <a class="button button-danger" href="{% url 'registration-manage-cancel' %}">Annuler l’inscription</a>
+  </div>
+{% endif %}
+
+<h2>Planning actuel</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Horaire</th><th>Animation</th><th>Lieu</th><th>Élèves</th></tr></thead>
+  <tbody>
+  {% for reservation in reservations %}
+    <tr><td>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</td><td>{{ reservation.session.animation.title }}</td><td>{{ reservation.session.location }}</td><td>{{ reservation.student_count }}</td></tr>
+  {% empty %}<tr><td colspan="4">Aucune réservation active.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+<div class="actions"><a class="button button-secondary" href="{% url 'registration-complete' registration.reference %}">Version imprimable</a></div>
+{% endblock %}
+

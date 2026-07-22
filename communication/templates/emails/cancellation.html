@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Annulation de votre inscription</title></head>
+<body>
+  <h1>Inscription annulée</h1>
+  <p>Bonjour {{ registration.teacher.first_name }} {{ registration.teacher.last_name }},</p>
+  <p>L'inscription suivante a bien été annulée :</p>
+  <dl>
+    <dt>Établissement</dt><dd>{{ registration.institution.name }}</dd>
+    <dt>Groupe</dt><dd>{{ registration.group_name }}</dd>
+    <dt>Jour de visite</dt><dd>{{ registration.visit_date|date:"l j F Y" }}</dd>
+    <dt>Référence</dt><dd>{{ registration.reference }}</dd>
+  </dl>
+  <p>Les places réservées ont été libérées.</p>
+  <p>Contact : <a href="mailto:{{ organization_email }}">{{ organization_email }}</a>{% if organization_phone %} — {{ organization_phone }}{% endif %}</p>
+</body>
+</html>
+

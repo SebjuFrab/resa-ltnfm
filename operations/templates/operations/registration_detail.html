@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Groupe {{ registration.group_code }} — LTNM{% endblock %}
+
+{% block content %}
+  <div class="page-heading-row">
+    <div>
+      <p class="eyebrow">{{ registration.get_status_display }}</p>
+      <h1>Groupe {{ registration.group_code }}</h1>
+      <p>{{ registration.institution.name }} · {{ registration.total_participant_count }} personnes · {{ registration.visit_date|date:"d/m/Y" }}</p>
+    </div>
+    <p class="status-badge status-{{ registration.status|lower }}">{{ registration.get_status_display }}</p>
+  </div>
+
+  <div class="actions">
+    {% if registration.status != "CANCELLED" and can_manage_registrations %}
+      <a class="button" href="{% url 'operations:registration-update' registration.reference %}">Modifier la fiche</a>
+      <a class="button" href="{% url 'operations:registration-planning' registration.reference %}">Modifier les animations</a>
+      {% if registration.status == "CONFIRMED" %}
+        <form method="post" action="{% url 'operations:registration-resend' registration.reference %}">{% csrf_token %}<button class="button-secondary" type="submit">Renvoyer le récapitulatif</button></form>
+      {% endif %}
+      <a class="button button-danger" href="{% url 'operations:registration-cancel' registration.reference %}">Annuler l’inscription</a>
+    {% endif %}
+  </div>
+
+  <dl>
+    <dt>Enseignant</dt><dd>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}<br><a href="mailto:{{ registration.teacher.email }}">{{ registration.teacher.email }}</a> · {{ registration.teacher.phone }}</dd>
+    <dt>Établissement</dt><dd>{{ registration.institution.name }} — {{ registration.institution.city }} ({{ registration.institution.department }})</dd>
+    <dt>Famille</dt><dd>{{ registration.family }}</dd>
+    <dt>Niveau</dt><dd>{{ registration.school_level }}{% if registration.level_comment %}<br>{{ registration.level_comment }}{% endif %}</dd>
+    <dt>Effectif</dt><dd>{{ registration.student_count }} étudiants + {{ registration.chaperone_count }} professeurs/accompagnateurs = <strong>{{ registration.total_participant_count }}</strong></dd>
+    {% if registration.comment %}<dt>Remarque</dt><dd>{{ registration.comment|linebreaksbr }}</dd>{% endif %}
+  </dl>
+
+  <h2>Animations réservées</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Horaire</th><th>Animation</th><th>Lieu de RDV</th><th>Responsable</th><th>Participants</th></tr></thead>
+      <tbody>
+        {% for reservation in reservations %}
+          <tr><td>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</td><td>{{ reservation.session.animation.title }}</td><td>{{ reservation.session.location }}</td><td>{{ reservation.session.organizer|default:"—" }}</td><td>{{ reservation.total_participant_count }}</td></tr>
+        {% empty %}<tr><td colspan="5">Aucune animation réservée.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Historique des courriels</h2>
+  <ul class="timeline">
+    {% for email in email_logs %}<li><strong>{{ email.get_kind_display }}</strong> · {{ email.created_at|date:"d/m/Y H:i" }} · {{ email.get_status_display }}</li>{% empty %}<li>Aucun courriel envoyé.</li>{% endfor %}
+  </ul>
+{% endblock %}

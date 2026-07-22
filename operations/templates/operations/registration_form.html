@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}{% if registration %}Modifier {{ registration.group_code }}{% else %}Inscrire un groupe{% endif %} — LTNM{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Saisie téléphonique FRAB</p>
+  <h1>{% if registration %}Modifier le groupe{% else %}Inscrire un groupe{% endif %}</h1>
+  <p>Renseignez les informations communiquées par l’enseignant. Aucun nom d’élève n’est demandé.</p>
+
+  <form method="post" novalidate id="registration-form">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <fieldset>
+      <legend>Établissement</legend>
+      <p>{{ form.existing_institution.label_tag }} {{ form.existing_institution }} {{ form.existing_institution.errors }}<span class="helptext">{{ form.existing_institution.help_text }}</span></p>
+      <div class="form-grid form-grid-3">
+        <p>{{ form.institution_type.label_tag }} {{ form.institution_type }} {{ form.institution_type.errors }}</p>
+        <p>{{ form.institution_name.label_tag }} {{ form.institution_name }} {{ form.institution_name.errors }}</p>
+        <p>{{ form.institution_city.label_tag }} {{ form.institution_city }} {{ form.institution_city.errors }}</p>
+        <p>{{ form.institution_department.label_tag }} {{ form.institution_department }} {{ form.institution_department.errors }}</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Enseignant au téléphone</legend>
+      <div class="form-grid form-grid-2">
+        <p>{{ form.teacher_last_name.label_tag }} {{ form.teacher_last_name }} {{ form.teacher_last_name.errors }}</p>
+        <p>{{ form.teacher_first_name.label_tag }} {{ form.teacher_first_name }} {{ form.teacher_first_name.errors }}</p>
+        <p>{{ form.teacher_email.label_tag }} {{ form.teacher_email }} {{ form.teacher_email.errors }}</p>
+        <p>{{ form.teacher_phone.label_tag }} {{ form.teacher_phone }} {{ form.teacher_phone.errors }}</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Groupe</legend>
+      <div class="form-grid form-grid-2">
+        <p class="group-code-field">{{ form.group_code.label_tag }} {{ form.group_code }} {{ form.group_code.errors }}<button class="button button-quiet" type="button" id="suggest-code">Proposer un autre code</button><span class="helptext">{{ form.group_code.help_text }}</span></p>
+        <p>{{ form.family.label_tag }} {{ form.family }} {{ form.family.errors }}</p>
+        <p>{{ form.school_level.label_tag }} {{ form.school_level }} {{ form.school_level.errors }}</p>
+        <p>{{ form.visit_date.label_tag }} {{ form.visit_date }} {{ form.visit_date.errors }}</p>
+        <p>{{ form.student_count.label_tag }} {{ form.student_count }} {{ form.student_count.errors }}</p>
+        <p>{{ form.chaperone_count.label_tag }} {{ form.chaperone_count }} {{ form.chaperone_count.errors }}</p>
+      </div>
+      <p class="total-panel" aria-live="polite">Effectif total compté dans les jauges : <strong><output id="total-participants">0</output> personne(s)</strong>.</p>
+      <p>{{ form.level_comment.label_tag }} {{ form.level_comment }} {{ form.level_comment.errors }}</p>
+      <p>{{ form.comment.label_tag }} {{ form.comment }} {{ form.comment.errors }}</p>
+    </fieldset>
+
+    <div class="actions">
+      <button type="submit">{% if registration %}Enregistrer et prévenir le professeur{% else %}Continuer vers les animations{% endif %}</button>
+      {% if registration %}<a class="button button-secondary" href="{% url 'operations:registration-detail' registration.reference %}">Annuler</a>{% endif %}
+    </div>
+  </form>
+
+  <script>
+  (() => {
+    const students = document.getElementById("id_student_count");
+    const chaperones = document.getElementById("id_chaperone_count");
+    const total = document.getElementById("total-participants");
+    const updateTotal = () => {
+      total.value = (Number.parseInt(students.value || "0", 10) || 0) + (Number.parseInt(chaperones.value || "0", 10) || 0);
+    };
+    students.addEventListener("input", updateTotal);
+    chaperones.addEventListener("input", updateTotal);
+    updateTotal();
+
+    const codeButton = document.getElementById("suggest-code");
+    codeButton.addEventListener("click", async () => {
+      codeButton.disabled = true;
+      try {
+        const response = await fetch("{% url 'operations:group-code-suggestion' %}", {headers: {"Accept": "application/json"}});
+        if (!response.ok) throw new Error("suggestion indisponible");
+        document.getElementById("id_group_code").value = (await response.json()).code;
+      } finally {
+        codeButton.disabled = false;
+      }
+    });
+  })();
+  </script>
+{% endblock %}

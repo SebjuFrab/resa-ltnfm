@@ -1,0 +1,13 @@
+# Application
+Django>=5.2,<5.3
+psycopg[binary]>=3.2,<4
+Pillow>=11,<12
+gunicorn>=23,<24
+whitenoise>=6.9,<7
+django-redis>=6,<7
+
+# Tests et qualité
+pytest>=8.3,<9
+pytest-django>=4.11,<5
+pytest-cov>=6,<7
+ruff>=0.12,<1

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Choisir les animations — LTNM{% endblock %}
+{% block content %}
+<h1>Choisir les animations</h1>
+<p><strong>{{ registration.institution.name }} — {{ registration.group_name }}</strong><br>
+{{ registration.student_count }} élèves, le {{ registration.visit_date|date:"d/m/Y" }}.</p>
+
+<form method="get" class="filters">
+  <fieldset>
+    <legend>Filtrer les séances</legend>
+    {{ filter_form.as_p }}
+    <div class="actions">
+      <button type="submit">Appliquer les filtres</button>
+      <a class="button button-secondary" href="{{ action_url }}">Effacer</a>
+    </div>
+  </fieldset>
+</form>
+
+<form method="post" action="{{ action_url }}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" novalidate>
+  {% csrf_token %}
+  {{ planning_form.non_field_errors }}
+  {% regroup session_rows by 0.starts_at as time_groups %}
+  {% for time_group in time_groups %}
+    <section aria-labelledby="time-{{ forloop.counter }}">
+      <h2 id="time-{{ forloop.counter }}">À {{ time_group.grouper|time:"H:i" }}</h2>
+      <div class="cards session-grid">
+        {% for row in time_group.list %}
+          {% with session=row.0 field=row.1 %}
+          <article class="card{% if session.remaining_capacity == 0 %} session-full{% endif %}">
+            <h3>{{ session.animation.title }}</h3>
+            <p>{{ session.starts_at|time:"H:i" }}–{{ session.ends_at|time:"H:i" }} · {{ session.location }}</p>
+            <p>{{ session.animation.short_description }}</p>
+            {% if session.animation.recommended_levels.exists %}
+              <p><strong>Niveaux conseillés :</strong> {% for level in session.animation.recommended_levels.all %}{{ level }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+            {% endif %}
+            {% if session.animation.accessibility %}<p><strong>Accessibilité :</strong> {{ session.animation.accessibility }}</p>{% endif %}
+            <p id="capacity-{{ session.pk }}"><strong>{{ session.remaining_capacity }} place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }}</strong> sur {{ session.max_capacity }}</p>
+            {% if session.status == "OPEN" %}
+              {{ field.label_tag }} {{ field }} {{ field.errors }}
+            {% else %}
+              <p class="alert alert-warning">Cette séance n’est plus ouverte.</p>
+              {{ field.as_hidden }}
+            {% endif %}
+          </article>
+          {% endwith %}
+        {% empty %}
+          <p>Aucune séance ne correspond à ces filtres.</p>
+        {% endfor %}
+      </div>
+    </section>
+  {% empty %}
+    <p class="alert alert-warning">Aucune séance n’est programmée pour ce jour avec ces filtres.</p>
+  {% endfor %}
+  <div class="actions">
+    <button type="submit">Enregistrer le planning</button>
+    {% if management_mode %}
+      <a class="button button-secondary" href="{% url 'registration-manage' %}">Retour au récapitulatif</a>
+    {% else %}
+      <a class="button button-secondary" href="{% url 'registration-review' registration.reference %}">Vérifier l’inscription</a>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

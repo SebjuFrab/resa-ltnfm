@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Inscription {{ registration.reference }} — LTNM{% endblock %}
+{% block content %}
+<h1>{% if registration.status == "CANCELLED" %}Inscription annulée{% else %}Inscription confirmée{% endif %}</h1>
+<p>Référence : <strong>{{ registration.reference }}</strong></p>
+<p>{{ registration.institution.name }} — {{ registration.group_name }} — {{ registration.student_count }} élèves — {{ registration.visit_date|date:"d/m/Y" }}</p>
+
+<h2>Planning</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Horaire</th><th>Animation</th><th>Lieu</th><th>Élèves</th><th>Consignes</th></tr></thead>
+    <tbody>
+      {% for reservation in reservations %}
+        <tr>
+          <td>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</td>
+          <td>{{ reservation.session.animation.title }}</td>
+          <td>{{ reservation.session.location }}</td>
+          <td>{{ reservation.student_count }}</td>
+          <td>{{ reservation.session.animation.instructions|default:"—" }}</td>
+        </tr>
+      {% empty %}<tr><td colspan="5">Aucune réservation active.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="actions">
+  <button type="button" onclick="window.print()">Imprimer</button>
+  {% if registration.status != "CANCELLED" %}<a class="button button-secondary" href="{% url 'registration-manage' %}">Gérer l’inscription</a>{% endif %}
+</div>
+{% endblock %}

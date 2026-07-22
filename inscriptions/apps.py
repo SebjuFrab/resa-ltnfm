@@ -1,0 +1,8 @@
+from django.apps import AppConfig
+
+
+class InscriptionsConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "inscriptions"
+    verbose_name = "Inscriptions"
+

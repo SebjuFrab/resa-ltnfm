@@ -1,0 +1,22 @@
+Bonjour {{ registration.teacher.first_name }} {{ registration.teacher.last_name }},
+
+Les modifications de votre inscription au salon La Terre est Notre Métier ont bien été enregistrées.
+
+Établissement : {{ registration.institution.name }}
+Groupe : {{ registration.group_name }}
+Code du groupe : {{ group_code }}
+Élèves : {{ registration.student_count }}
+Accompagnateurs : {{ registration.chaperone_count }}
+Effectif total : {{ total_count }}
+Jour de visite : {{ registration.visit_date|date:"l j F Y" }}
+Référence : {{ registration.reference }}
+
+Programme mis à jour :
+{% for reservation in reservations %}- {{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }} : {{ reservation.session.animation.title }} — {{ reservation.session.location }} ({{ reservation.total_participant_count }} personnes : {{ reservation.student_count }} élèves + {{ reservation.chaperone_count }} professeurs/accompagnateurs){% if reservation.session.animation.instructions %}
+  Consignes : {{ reservation.session.animation.instructions }}{% endif %}
+{% empty %}- Aucune séance réservée.
+{% endfor %}
+{% if edit_url %}Consulter ou modifier l'inscription : {{ edit_url }}
+Les modifications sont possibles jusqu'au {{ edit_deadline|date:"d/m/Y \u00e0 H:i" }}.
+{% endif %}
+Contact : {{ organization_email }}{% if organization_phone %} — {{ organization_phone }}{% endif %}

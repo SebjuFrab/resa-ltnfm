@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Annuler l’inscription — LTNM{% endblock %}
+{% block content %}
+<h1>Annuler l’inscription</h1>
+<p class="alert alert-warning">Cette action libérera toutes les places réservées pour {{ registration.group_name }}.</p>
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  <p>{{ form.confirm }} {{ form.confirm.label_tag }} {{ form.confirm.errors }}</p>
+  <div class="actions">
+    <button class="button-danger" type="submit">Annuler définitivement</button>
+    <a class="button button-secondary" href="{% url 'registration-manage' %}">Conserver l’inscription</a>
+  </div>
+</form>
+{% endblock %}
+

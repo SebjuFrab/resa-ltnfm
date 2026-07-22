@@ -1,0 +1,329 @@
+from datetime import date, time, timedelta
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.core import mail
+from django.test import TestCase, override_settings
+from django.utils import timezone
+
+from catalogue.models import Animation, Category, SchoolLevel, Session
+from communication.mailing import (
+    create_and_send_mailing,
+    create_mailing_campaign,
+    preview_mailing_recipients,
+    send_mailing_campaign,
+)
+from communication.models import MailingCampaign, MailingDelivery
+from communication.rich_text import rich_html_to_text, sanitize_rich_html
+from inscriptions.models import (
+    GroupFamily,
+    Institution,
+    Registration,
+    Reservation,
+    Teacher,
+)
+
+
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    DEFAULT_FROM_EMAIL="organisation@example.test",
+)
+class MailingTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user(username="frab", password="secret")
+        category = Category.objects.create(name="Nature", slug="nature")
+        cls.level = SchoolLevel.objects.create(code="LYCEE", label="Lycée")
+        cls.family = GroupFamily.objects.create(
+            name="Lycées", slug="lycees", sort_order=1
+        )
+        cls.other_family = GroupFamily.objects.create(
+            name="Collèges", slug="colleges", sort_order=2
+        )
+        animation = Animation.objects.create(
+            title="Le sol vivant",
+            slug="sol-vivant",
+            short_description="Découvrir le sol.",
+            category=category,
+            indicative_duration=45,
+        )
+        other_animation = Animation.objects.create(
+            title="Les graines",
+            slug="graines",
+            short_description="Découvrir les graines.",
+            category=category,
+            indicative_duration=30,
+        )
+        cls.first_session = Session.objects.create(
+            animation=animation,
+            date=date(2026, 9, 23),
+            starts_at=time(10),
+            ends_at=time(10, 45),
+            location="Pôle sols",
+            max_capacity=60,
+            organizer="Équipe sols",
+            organizer_email="responsable@example.test",
+        )
+        cls.second_session = Session.objects.create(
+            animation=other_animation,
+            date=date(2026, 9, 24),
+            starts_at=time(11),
+            ends_at=time(11, 30),
+            location="Pôle graines",
+            max_capacity=60,
+            organizer="Équipe graines",
+            organizer_email="RESPONSABLE@example.test",
+        )
+        cls.first_registration = cls._registration(
+            suffix="a",
+            group_code="TRUFFE",
+            visit_date=date(2026, 9, 23),
+            family=cls.family,
+            session=cls.first_session,
+            students=24,
+            chaperones=2,
+        )
+        cls.second_registration = cls._registration(
+            suffix="b",
+            group_code="CAROTTE",
+            visit_date=date(2026, 9, 24),
+            family=cls.other_family,
+            session=cls.second_session,
+            students=18,
+            chaperones=3,
+        )
+        cls._registration(
+            suffix="draft",
+            group_code="NAVET",
+            visit_date=date(2026, 9, 23),
+            family=cls.family,
+            session=cls.first_session,
+            students=10,
+            chaperones=1,
+            status=Registration.Status.DRAFT,
+        )
+
+    @classmethod
+    def _registration(
+        cls,
+        *,
+        suffix,
+        group_code,
+        visit_date,
+        family,
+        session,
+        students,
+        chaperones,
+        status=Registration.Status.CONFIRMED,
+    ):
+        institution = Institution.objects.create(
+            name=f"Établissement {suffix}",
+            institution_type=Institution.Type.HIGH_SCHOOL,
+            address="1 rue Verte",
+            postal_code="35000",
+            city="Rennes",
+            department="35",
+        )
+        teacher = Teacher.objects.create(
+            institution=institution,
+            first_name=f"Prénom {suffix}",
+            last_name=f"Nom {suffix}",
+            email=f"prof-{suffix}@example.test",
+            phone="0600000000",
+        )
+        registration = Registration.objects.create(
+            institution=institution,
+            teacher=teacher,
+            group_name=f"Groupe {suffix}",
+            group_code=group_code,
+            family=family,
+            school_level=cls.level,
+            student_count=students,
+            chaperone_count=chaperones,
+            visit_date=visit_date,
+            status=status,
+            draft_expires_at=(timezone.now() if status == Registration.Status.DRAFT else None),
+            edit_token_digest=(suffix[0] * 64 if len(suffix) == 1 else "d" * 63 + "1"),
+            confirmed_at=(timezone.now() if status == Registration.Status.CONFIRMED else None),
+        )
+        Reservation.objects.create(
+            registration=registration,
+            session=session,
+            student_count=students,
+            chaperone_count=chaperones,
+        )
+        return registration
+
+    def test_preview_counts_confirmed_teachers_and_deduplicated_organizer(self):
+        preview = preview_mailing_recipients()
+
+        self.assertEqual(preview.teacher_count, 2)
+        self.assertEqual(preview.organizer_count, 1)
+        self.assertEqual(preview.total_count, 3)
+        self.assertEqual(preview.missing_teacher_email_count, 0)
+        self.assertEqual(preview.missing_organizer_email_count, 0)
+
+    def test_preview_filters_by_date_and_family(self):
+        by_date = preview_mailing_recipients(visit_date="2026-09-23")
+        by_family = preview_mailing_recipients(family=self.other_family)
+        by_slug = preview_mailing_recipients(family="lycees")
+
+        self.assertEqual((by_date.teacher_count, by_date.organizer_count), (1, 1))
+        self.assertEqual((by_family.teacher_count, by_family.organizer_count), (1, 1))
+        self.assertEqual((by_slug.teacher_count, by_slug.organizer_count), (1, 1))
+
+    def test_default_preview_excludes_other_editions_and_anonymized_groups(self):
+        Registration.objects.filter(pk=self.first_registration.pk).update(
+            visit_date=date(2024, 9, 25)
+        )
+        Registration.objects.filter(pk=self.second_registration.pk).update(
+            anonymized_at=timezone.now()
+        )
+
+        preview = preview_mailing_recipients()
+
+        self.assertEqual(preview.total_count, 0)
+
+    def test_rich_text_sanitizer_keeps_formatting_and_removes_active_content(self):
+        cleaned = sanitize_rich_html(
+            '<p style="color:red" onclick="evil()">Bonjour <strong>à tous</strong>'
+            '<script>alert(1)</script><a href="javascript:evil()">mauvais</a>'
+            '<a href="https://example.test" target="_blank">bon lien</a></p>'
+        )
+
+        self.assertEqual(
+            cleaned,
+            '<p>Bonjour <strong>à tous</strong><a>mauvais</a>'
+            '<a href="https://example.test">bon lien</a></p>',
+        )
+        self.assertEqual(rich_html_to_text(cleaned), "Bonjour à tousmauvaisbon lien")
+
+    def test_create_campaign_freezes_sanitized_content_and_recipients(self):
+        campaign = create_mailing_campaign(
+            subject=" Informations finales ",
+            body_html="<h2>Bienvenue</h2><p>Rendez-vous <em>à 9 h</em>.</p>",
+            created_by=self.user,
+            visit_date=date(2026, 9, 23),
+            family=self.family,
+        )
+
+        self.assertEqual(campaign.subject, "Informations finales")
+        self.assertEqual(campaign.family_filter, str(self.family.pk))
+        self.assertEqual(campaign.family_label, "Lycées")
+        self.assertEqual(campaign.deliveries.count(), 2)
+        teacher = campaign.deliveries.get(
+            recipient_kind=MailingDelivery.RecipientKind.TEACHER
+        )
+        self.assertEqual(teacher.registration, self.first_registration)
+        self.assertEqual(
+            teacher.context_snapshot["registration"]["total_count"], 26
+        )
+        self.assertIn("Bienvenue", campaign.body_text)
+
+    def test_send_is_individual_personalized_and_idempotent(self):
+        first = create_and_send_mailing(
+            subject="Dernières informations",
+            body_html="<p>Présentez-vous à l’accueil.</p>",
+            created_by=self.user,
+            idempotency_key="mailing-final-2026",
+        )
+
+        self.assertEqual(first.campaign.status, MailingCampaign.Status.SENT)
+        self.assertEqual(first.sent_count, 3)
+        self.assertEqual(first.failed_count, 0)
+        self.assertEqual(len(mail.outbox), 3)
+        self.assertTrue(all(len(message.to) == 1 for message in mail.outbox))
+        teacher_message = next(
+            message for message in mail.outbox if message.to == ["prof-a@example.test"]
+        )
+        organizer_message = next(
+            message
+            for message in mail.outbox
+            if message.to == ["responsable@example.test"]
+        )
+        self.assertIn(self.first_registration.group_code, teacher_message.body)
+        self.assertIn("Effectif total : 26", teacher_message.body)
+        self.assertIn(self.first_registration.group_code, organizer_message.body)
+        self.assertIn(self.second_registration.group_code, organizer_message.body)
+
+        second = create_and_send_mailing(
+            subject="Dernières informations",
+            body_html="<p>Présentez-vous à l’accueil.</p>",
+            created_by=self.user,
+            idempotency_key="mailing-final-2026",
+        )
+
+        self.assertEqual(MailingCampaign.objects.count(), 1)
+        self.assertEqual(len(mail.outbox), 3)
+        self.assertEqual(second.skipped_count, 3)
+
+    @patch("communication.mailing.EmailMultiAlternatives.send")
+    def test_failures_are_logged_and_only_explicitly_retried(self, mocked_send):
+        mocked_send.side_effect = RuntimeError(
+            "Échec SMTP pour responsable@example.test\nsecret"
+        )
+        campaign = create_mailing_campaign(
+            subject="Informations",
+            body_html="<p>Texte.</p>",
+        )
+
+        first = send_mailing_campaign(campaign)
+        self.assertEqual(first.failed_count, 3)
+        self.assertEqual(mocked_send.call_count, 3)
+        failed = campaign.deliveries.get(recipient="responsable@example.test")
+        self.assertNotIn("responsable@example.test", failed.error_summary)
+        self.assertNotIn("\n", failed.error_summary)
+        self.assertEqual(failed.attempts, 1)
+
+        send_mailing_campaign(campaign)
+        self.assertEqual(mocked_send.call_count, 3)
+
+        mocked_send.side_effect = None
+        mocked_send.return_value = 1
+        retried = send_mailing_campaign(campaign, retry_failed=True)
+        self.assertEqual(retried.sent_count, 3)
+        self.assertEqual(mocked_send.call_count, 6)
+        self.assertFalse(
+            campaign.deliveries.exclude(
+                status=MailingDelivery.Status.SENT, attempts=2
+            ).exists()
+        )
+
+    def test_same_idempotency_key_rejects_different_content(self):
+        create_mailing_campaign(
+            subject="Informations",
+            body_html="<p>Première version.</p>",
+            idempotency_key="stable-key",
+        )
+
+        with self.assertRaisesMessage(ValueError, "autre envoi"):
+            create_mailing_campaign(
+                subject="Informations",
+                body_html="<p>Autre version.</p>",
+                idempotency_key="stable-key",
+            )
+
+    def test_stale_sending_delivery_requires_an_explicit_retry(self):
+        campaign = create_mailing_campaign(
+            subject="Informations",
+            body_html="<p>Texte.</p>",
+        )
+        interrupted = campaign.deliveries.order_by("pk").first()
+        MailingDelivery.objects.filter(pk=interrupted.pk).update(
+            status=MailingDelivery.Status.SENDING,
+            last_attempted_at=timezone.now() - timedelta(minutes=10),
+        )
+
+        first = send_mailing_campaign(campaign)
+
+        interrupted.refresh_from_db()
+        self.assertEqual(interrupted.status, MailingDelivery.Status.FAILED)
+        self.assertEqual(first.sent_count, 2)
+        self.assertEqual(first.failed_count, 1)
+        self.assertEqual(len(mail.outbox), 2)
+
+        second = send_mailing_campaign(campaign, retry_failed=True)
+
+        self.assertEqual(second.sent_count, 3)
+        self.assertEqual(second.failed_count, 0)
+        self.assertEqual(len(mail.outbox), 3)

@@ -1,0 +1,15 @@
+Bonjour {{ snapshot.registration.teacher_first_name }} {{ snapshot.registration.teacher_last_name }},
+
+{{ campaign.body_text }}
+
+Récapitulatif de votre groupe
+Code du groupe : {{ snapshot.registration.group_code }}
+Établissement : {{ snapshot.registration.institution }}
+Jour de visite : {{ snapshot.registration.visit_date_label }}
+Niveau : {{ snapshot.registration.school_level }}
+Effectif total : {{ snapshot.registration.total_count }} ({{ snapshot.registration.student_count }} élèves et {{ snapshot.registration.chaperone_count }} accompagnateurs)
+
+Programme :
+{% for reservation in snapshot.registration.reservations %}- {{ reservation.starts_at }}–{{ reservation.ends_at }} : {{ reservation.animation }} — {{ reservation.location }} ({{ reservation.total_count }} personnes)
+{% empty %}- Aucune animation réservée.
+{% endfor %}

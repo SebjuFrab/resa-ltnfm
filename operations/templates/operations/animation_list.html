@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Animations et disponibilités — LTNM{% endblock %}
+
+{% block content %}
+  <div class="page-heading-row">
+    <div>
+      <p class="eyebrow">Outil équipe FRAB</p>
+      <h1>Animations et disponibilités</h1>
+      <p>Consultez les créneaux pendant l’appel et filtrez-les selon les besoins du groupe.</p>
+    </div>
+    {% if can_manage_registrations %}
+      <a class="button" href="{% url 'operations:registration-create' %}">Inscrire un groupe</a>
+    {% endif %}
+  </div>
+
+  <form method="get" class="filters" aria-label="Filtres des animations">
+    <fieldset>
+      <legend>Filtrer les animations</legend>
+      <div class="form-grid form-grid-3">{{ filter_form.as_p }}</div>
+      <div class="actions">
+        <button type="submit">Appliquer les filtres</button>
+        <a class="button button-secondary" href="{% url 'operations:animation-list' %}">Effacer</a>
+      </div>
+    </fieldset>
+  </form>
+
+  <p class="results-count"><strong>{{ sessions|length }}</strong> créneau{{ sessions|length|pluralize }} affiché{{ sessions|length|pluralize }}.</p>
+  <div class="cards session-grid">
+    {% for session in sessions %}
+      <article class="card{% if session.remaining_capacity == 0 %} session-full{% endif %}">
+        <p class="card-kicker">{{ session.date|date:"l d F" }} · {{ session.starts_at|time:"H:i" }}–{{ session.ends_at|time:"H:i" }}</p>
+        <h2 class="card-title">{{ session.animation.title }}</h2>
+        <dl class="compact-details">
+          <dt>Lieu de RDV</dt><dd>{{ session.location }}</dd>
+          <dt>Durée</dt><dd>{{ session.animation.indicative_duration }} min</dd>
+          <dt>Famille</dt><dd>{{ session.animation.category.name }}</dd>
+          <dt>Responsable</dt><dd>{{ session.organizer|default:"Non renseigné" }}{% if session.organizer_email %}<br><a href="mailto:{{ session.organizer_email }}">{{ session.organizer_email }}</a>{% endif %}</dd>
+        </dl>
+        <p class="capacity"><strong>{{ session.remaining_capacity }}</strong> place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }} sur {{ session.max_capacity }}</p>
+        <p class="status-badge status-{{ session.status|lower }}">{{ session.get_status_display }}</p>
+      </article>
+    {% empty %}
+      <p class="alert alert-warning">Aucun créneau ne correspond à ces filtres.</p>
+    {% endfor %}
+  </div>
+{% endblock %}

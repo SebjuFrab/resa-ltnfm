@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Inscriptions closes — LTNM{% endblock %}
+{% block content %}
+<h1>Les inscriptions en ligne sont closes</h1>
+<p class="alert alert-warning">La clôture était fixée au {{ edit_deadline|date:"d/m/Y à H:i" }}.</p>
+<p>Contactez l’organisation pour toute création ou modification exceptionnelle.</p>
+{% endblock %}

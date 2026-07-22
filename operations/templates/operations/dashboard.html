@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Tableau de bord — LTNM{% endblock %}
+
+{% block content %}
+  <h1>Tableau de bord</h1>
+
+  <div class="actions">
+    {% if can_manage_registrations %}<a class="button" href="{% url 'operations:registration-create' %}">Inscrire un groupe</a>{% endif %}
+    {% if perms.catalogue.view_session %}<a class="button button-secondary" href="{% url 'operations:animation-list' %}">Voir les animations</a>{% endif %}
+    {% if perms.catalogue.add_animation and perms.catalogue.add_session %}<a class="button" href="{% url 'operations:session-import' %}">Importer des séances</a>{% endif %}
+    {% if perms.communication.send_mailing %}<a class="button" href="{% url 'operations:mailing-create' %}">Publipostage final</a>{% endif %}
+    <button class="button button-secondary" type="button" onclick="window.print()">Imprimer</button>
+  </div>
+
+  <section aria-labelledby="exports">
+    <h2 id="exports">Exporter les données</h2>
+    <form class="filters" method="get" action="{% url 'operations:export-download' %}">
+      {{ export_form.as_p }}
+      <button type="submit">Télécharger le CSV</button>
+    </form>
+  </section>
+
+  <section aria-labelledby="indicateurs">
+    <h2 id="indicateurs">Indicateurs</h2>
+    <div class="cards metric-grid">
+      <article class="card"><h3>Établissements</h3><p class="metric">{{ institution_count }}</p></article>
+      <article class="card"><h3>Groupes confirmés</h3><p class="metric">{{ group_count }}</p></article>
+      <article class="card"><h3>Remplissage global</h3><p class="metric">{{ global_fill_rate }} %</p></article>
+      <article class="card"><h3>Participants sans aucune séance</h3><p class="metric">{{ unassigned_participants }}</p></article>
+      <article class="card"><h3>Séances complètes</h3><p class="metric">{{ full_session_count }}</p></article>
+      <article class="card"><h3>Séances remplies à moins de 25 %</h3><p class="metric">{{ low_session_count }}</p></article>
+      <article class="card"><h3>Alertes de surcapacité</h3><p class="metric">{{ overbooked_session_count }}</p></article>
+      <article class="card"><h3>Brouillons</h3><p class="metric">{{ incomplete_count }}</p></article>
+    </div>
+  </section>
+
+  <section aria-labelledby="effectifs-jour">
+    <h2 id="effectifs-jour">Participants inscrits par jour</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Jour</th><th scope="col">Participants</th></tr></thead>
+        <tbody>
+          {% for item in students_by_day %}
+            <tr><td>{{ item.visit_date|date:"l j F Y" }}</td><td>{{ item.participant_count }}</td></tr>
+          {% empty %}<tr><td colspan="2">Aucune inscription confirmée.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="places-horaires">
+    <h2 id="places-horaires">Places disponibles par horaire</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Jour</th><th scope="col">Horaire</th><th scope="col">Places restantes</th></tr></thead>
+        <tbody>
+          {% for item in available_by_slot %}
+            <tr><td>{{ item.date|date:"d/m/Y" }}</td><td>{{ item.starts_at|time:"H:i" }}</td><td>{{ item.remaining }}</td></tr>
+          {% empty %}<tr><td colspan="3">Aucune séance ouverte.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="remplissage-seances">
+    <h2 id="remplissage-seances">Remplissage des séances</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Jour et heure</th><th scope="col">Animation</th>
+            <th scope="col">Lieu</th><th scope="col">Statut</th><th scope="col">Réservé</th>
+            <th scope="col">Restant</th><th scope="col">Taux</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for metric in session_metrics %}
+            <tr{% if metric.is_full %} class="session-full"{% endif %}>
+              <td>{{ metric.session.date|date:"d/m/Y" }} à {{ metric.session.starts_at|time:"H:i" }}</td>
+              <td>{{ metric.session.animation.title }}</td>
+              <td>{{ metric.session.location }}</td>
+              <td>{{ metric.session.get_status_display }}</td>
+              <td>{{ metric.reserved }} / {{ metric.session.max_capacity }}</td>
+              <td>{{ metric.remaining }}</td>
+              <td>
+                {{ metric.fill_rate }} %
+                {% if metric.is_overbooked %} — <strong>surcapacité</strong>{% elif metric.is_low %} — faible{% endif %}
+              </td>
+            </tr>
+          {% empty %}<tr><td colspan="7">Aucune séance.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="recherche-inscriptions">
+    <h2 id="recherche-inscriptions">Rechercher une inscription</h2>
+    <form class="filters" method="get">
+      {{ search_form.as_p }}
+      <button type="submit">Rechercher</button>
+      <a class="button button-secondary" href="{% url 'operations:dashboard' %}">Effacer</a>
+    </form>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Référence</th><th scope="col">Établissement</th>
+            <th scope="col">Groupe</th><th scope="col">Professeur</th>
+            <th scope="col">Jour</th><th scope="col">Statut</th><th scope="col">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for registration in registration_page %}
+            <tr>
+              <td>{{ registration.reference }}</td>
+              <td>{{ registration.institution.name }}</td>
+              <td>{{ registration.group_name }}</td>
+              <td>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}<br>{{ registration.teacher.email }}</td>
+              <td>{{ registration.visit_date|date:"d/m/Y" }}</td>
+              <td>{{ registration.get_status_display }}</td>
+              <td><a href="{{ registration.staff_detail_url }}">Ouvrir la fiche</a></td>
+            </tr>
+          {% empty %}<tr><td colspan="7">Aucune inscription trouvée.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if registration_page.has_other_pages %}
+      <nav aria-label="Pagination des inscriptions">
+        <p>
+          {% if registration_page.has_previous %}<a href="?{{ pagination_prefix }}page={{ registration_page.previous_page_number }}">Page précédente</a>{% endif %}
+          Page {{ registration_page.number }} sur {{ registration_page.paginator.num_pages }}
+          {% if registration_page.has_next %}<a href="?{{ pagination_prefix }}page={{ registration_page.next_page_number }}">Page suivante</a>{% endif %}
+        </p>
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}

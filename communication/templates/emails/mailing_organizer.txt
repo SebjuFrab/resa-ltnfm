@@ -1,0 +1,12 @@
+Bonjour{% if delivery.recipient_name %} {{ delivery.recipient_name }}{% endif %},
+
+{{ campaign.body_text }}
+
+Récapitulatif des groupes attendus
+{% for session in snapshot.sessions %}
+{{ session.date_label }} · {{ session.starts_at }}–{{ session.ends_at }} · {{ session.animation }}
+Lieu de rendez-vous : {{ session.location }}
+Effectif total : {{ session.total_count }}
+{% for group in session.groups %}- {{ group.group_code }} — {{ group.institution }} — {{ group.teacher_name }} ({{ group.teacher_email }}) : {{ group.total_count }} personnes, dont {{ group.student_count }} élèves et {{ group.chaperone_count }} accompagnateurs
+{% endfor %}{% empty %}Aucun groupe inscrit.
+{% endfor %}

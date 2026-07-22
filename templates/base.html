@@ -1,0 +1,60 @@
+{% load static %}
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="same-origin">
+  <meta name="theme-color" content="#f3b709">
+  <title>{% block title %}Inscriptions scolaires — LTNM{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body>
+  <a class="skip-link" href="#contenu">Aller au contenu</a>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="{% url 'operations:dashboard' %}" aria-label="Accueil de la gestion des groupes La Terre est Notre Métier">
+        <span class="brand-name" aria-hidden="true">La Terre<br>est Notre<br>Métier</span>
+        <span class="brand-tagline" aria-hidden="true">Le salon agricole de la bio</span>
+      </a>
+      <div class="event-heading">
+        <span class="event-kicker">Outil équipe FRAB</span>
+        <strong class="event-date">23 &amp; 24 septembre 2026</strong>
+        <span class="event-location">Retiers (35)</span>
+      </div>
+    </div>
+  </header>
+  <div class="brand-stripe" aria-hidden="true"></div>
+  {% if user.is_staff %}
+    <div class="staff-nav-shell">
+      <nav class="container staff-nav" aria-label="Navigation de gestion">
+        <a href="{% url 'operations:dashboard' %}">Tableau de bord</a>
+        {% if perms.catalogue.view_session %}<a href="{% url 'operations:animation-list' %}">Animations</a>{% endif %}
+        {% if can_manage_registrations %}<a href="{% url 'operations:registration-create' %}">Nouveau groupe</a>{% endif %}
+        {% if perms.catalogue.add_animation and perms.catalogue.add_session %}<a href="{% url 'operations:session-import' %}">Importer</a>{% endif %}
+        {% if perms.communication.send_mailing %}<a href="{% url 'operations:mailing-create' %}">Publipostage</a>{% endif %}
+        <a href="{% url 'admin:index' %}">Paramètres</a>
+        <span class="staff-account">{{ user.get_username }}</span>
+        <form method="post" action="{% url 'admin:logout' %}">
+          {% csrf_token %}
+          <button class="staff-logout" type="submit">Déconnexion</button>
+        </form>
+      </nav>
+    </div>
+  {% endif %}
+  <main id="contenu" class="container">
+    {% if messages %}
+      <div aria-live="polite">
+        {% for message in messages %}<p class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</p>{% endfor %}
+      </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p class="footer-signature">La Terre est Notre Métier<br><span>Un événement du réseau FNAB</span></p>
+      <p>Besoin d’aide ? <a href="mailto:{{ organization_email }}">{{ organization_email }}</a>{% if organization_phone %} — {{ organization_phone }}{% endif %}</p>
+    </div>
+  </footer>
+</body>
+</html>
