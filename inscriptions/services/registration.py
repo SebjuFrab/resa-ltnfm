@@ -359,7 +359,10 @@ def update_registration(
 ) -> Registration:
     at = _at(at)
     registration = (
-        Registration.objects.select_for_update()
+        # ``family`` is nullable and therefore joined with LEFT OUTER JOIN.
+        # PostgreSQL cannot lock the nullable side of that join, so restrict
+        # the row lock to the registration itself.
+        Registration.objects.select_for_update(of=("self",))
         .select_related("institution", "teacher", "school_level", "family")
         .get(pk=_registration_id(registration_or_id))
     )

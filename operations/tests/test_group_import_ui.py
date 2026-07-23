@@ -193,3 +193,57 @@ class GroupImportViewTests(TestCase):
 
         self.assertRedirects(response, reverse("operations:group-import"))
         self.assertEqual(Registration.objects.count(), 0)
+
+    def test_imported_draft_can_be_opened_and_saved_from_the_update_form(self):
+        self.client.force_login(self.staff)
+        self.client.post(
+            reverse("operations:group-import"),
+            {"file": self._upload(self._valid_row("carotte-bleue"))},
+        )
+        self.client.post(
+            reverse("operations:group-import"),
+            {"action": "confirm"},
+        )
+        registration = Registration.objects.select_related(
+            "institution",
+            "teacher",
+        ).get(group_code="carotte-bleue")
+        update_url = reverse(
+            "operations:registration-update",
+            kwargs={"reference": registration.reference},
+        )
+
+        response = self.client.get(update_url)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(
+            update_url,
+            {
+                "existing_institution": str(registration.institution_id),
+                "institution_type": registration.institution.institution_type,
+                "institution_name": "",
+                "institution_city": "",
+                "institution_department": "",
+                "teacher_last_name": registration.teacher.last_name,
+                "teacher_first_name": registration.teacher.first_name,
+                "teacher_email": registration.teacher.email,
+                "teacher_phone": registration.teacher.phone,
+                "group_code": registration.group_code,
+                "family": str(registration.family_id),
+                "school_level": str(registration.school_level_id),
+                "visit_date": registration.visit_date.isoformat(),
+                "student_count": str(registration.student_count),
+                "chaperone_count": str(registration.chaperone_count),
+                "level_comment": registration.level_comment,
+                "comment": registration.comment,
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "operations:registration-review",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
