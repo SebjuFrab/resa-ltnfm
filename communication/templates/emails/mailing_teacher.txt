@@ -1,6 +1,6 @@
 Bonjour {{ snapshot.registration.teacher_first_name }} {{ snapshot.registration.teacher_last_name }},
 
-{{ campaign.body_text }}
+{{ personalized_body_text }}
 
 Récapitulatif de votre groupe
 Code du groupe : {{ snapshot.registration.group_code }}

@@ -38,7 +38,7 @@
       <thead><tr><th>Horaire</th><th>Animation</th><th>Lieu de RDV</th><th>Responsable</th><th>Participants</th></tr></thead>
       <tbody>
         {% for reservation in reservations %}
-          <tr><td>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</td><td>{{ reservation.session.animation.title }}</td><td>{{ reservation.session.location }}</td><td>{{ reservation.session.organizer|default:"—" }}</td><td>{{ reservation.total_participant_count }}</td></tr>
+          <tr><td>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</td><td>{{ reservation.session.animation.title }}</td><td>{{ reservation.session.location }}</td><td>{{ reservation.session.organizer|default:"—" }}</td><td>{{ reservation.student_count }} élèves + {{ reservation.chaperone_count }} accompagnateur{{ reservation.chaperone_count|pluralize }} = <strong>{{ reservation.total_participant_count }}</strong></td></tr>
         {% empty %}<tr><td colspan="5">Aucune animation réservée.</td></tr>{% endfor %}
       </tbody>
     </table>

@@ -1,0 +1,13 @@
+[Unit]
+Description=Sauvegarde locale des réservations LTNM
+Requires=docker.service ltnm-reservations.service
+After=docker.service ltnm-reservations.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/resa-ltnfm
+ExecStart=/opt/resa-ltnfm/deploy/debian/backup.sh
+UMask=0077
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=idle

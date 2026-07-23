@@ -1,6 +1,6 @@
 Bonjour{% if delivery.recipient_name %} {{ delivery.recipient_name }}{% endif %},
 
-{{ campaign.body_text }}
+{{ personalized_body_text }}
 
 Récapitulatif des groupes attendus
 {% for session in snapshot.sessions %}

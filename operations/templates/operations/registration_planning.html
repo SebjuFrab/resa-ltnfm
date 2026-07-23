@@ -1,55 +1,86 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Animations de {{ registration.group_code }} — LTNM{% endblock %}
 
 {% block content %}
-  <p class="eyebrow">Groupe {{ registration.group_code }}</p>
-  <h1>Choisir les animations</h1>
-  <p><strong>{{ institution_name }}</strong> · {{ registration.total_participant_count }} personnes le {{ registration.visit_date|date:"d/m/Y" }}.</p>
-  {% if is_rescheduling %}<p class="alert alert-warning">Le planning actuel reste inchangé tant que vous n’avez pas enregistré au moins une animation pour ce nouveau jour.</p>{% endif %}
+  <div class="page-heading-row">
+    <div>
+      <p class="eyebrow">Groupe {{ registration.group_code }}</p>
+      <h1>Choisir les animations</h1>
+      <p><strong>{{ institution_name }}</strong> · {{ registration.total_participant_count }} personnes le {{ registration.visit_date|date:"d/m/Y" }}.</p>
+    </div>
+  </div>
+  {% if is_rescheduling %}<p class="alert alert-warning">La fiche et le planning actuels restent inchangés jusqu’à l’enregistrement de cette étape. Vérifiez les effectifs attribués à chaque animation.</p>{% endif %}
 
-  <form method="get" class="filters">
+  <form method="get" class="filters" aria-label="Filtres des animations" data-auto-submit-filters>
+    {% if is_rescheduling %}<input type="hidden" name="reschedule" value="1">{% endif %}
     <fieldset>
-      <legend>Filtrer les créneaux</legend>
+      <legend>Filtrer les animations</legend>
       <div class="form-grid form-grid-3">{{ filter_form.as_p }}</div>
       <div class="actions">
-        <button type="submit">Appliquer les filtres</button>
-        <a class="button button-secondary" href="{{ action_url }}">Effacer</a>
+        <a class="button button-secondary" href="{{ action_url }}{% if is_rescheduling %}?reschedule=1{% endif %}" data-clear-filters>Effacer</a>
       </div>
+      <p class="helptext">Les résultats se mettent à jour automatiquement.</p>
     </fieldset>
   </form>
 
-  <form method="post" action="{{ action_url }}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" novalidate>
+  <p class="results-count"><strong>{{ session_rows|length }}</strong> créneau{% if session_rows|length > 1 %}x{% endif %} affiché{{ session_rows|length|pluralize }}.</p>
+  <form class="planning-form" method="post" action="{{ action_url }}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" data-filter-draft data-unfiltered-action="{{ action_url }}{% if is_rescheduling %}?reschedule=1{% endif %}" novalidate>
     {% csrf_token %}
     {{ planning_form.non_field_errors }}
-    {% regroup session_rows by 0.starts_at as time_groups %}
-    {% for time_group in time_groups %}
-      <section aria-labelledby="time-{{ forloop.counter }}">
-        <h2 id="time-{{ forloop.counter }}">À {{ time_group.grouper|time:"H:i" }}</h2>
-        <div class="cards session-grid">
-          {% for row in time_group.list %}
-            {% with session=row.0 field=row.1 %}
-              <article class="card{% if session.remaining_capacity == 0 %} session-full{% endif %}">
-                <p class="card-kicker">{{ session.starts_at|time:"H:i" }}–{{ session.ends_at|time:"H:i" }} · {{ session.location }}</p>
-                <h3>{{ session.animation.title }}</h3>
-                <p>{{ session.animation.short_description }}</p>
-                {% if session.animation.recommended_levels.exists %}<p><strong>Niveaux :</strong> {% for level in session.animation.recommended_levels.all %}{{ level }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
-                <p id="capacity-{{ session.pk }}" class="capacity"><strong>{{ session.remaining_capacity }}</strong> place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }} sur {{ session.max_capacity }}</p>
-                <div class="session-choice">{{ field }} {{ field.label_tag }} {{ field.errors }}</div>
-              </article>
-            {% endwith %}
-          {% empty %}<p>Aucun créneau ne correspond à ces filtres.</p>{% endfor %}
-        </div>
-      </section>
-    {% empty %}<p class="alert alert-warning">Aucun créneau n’est programmé pour ce jour.</p>{% endfor %}
+    <div class="cards session-grid planning-session-grid" data-layout="compact-grid">
+      {% for row in session_rows %}
+        {% with session=row.0 student_field=row.1 chaperone_field=row.2 can_fill_full=row.3 allocation_editable=row.4 removal_required=row.5 %}
+          <article class="card planning-session-card{% if session.remaining_capacity == 0 and not allocation_editable %} session-full{% endif %}">
+            <p class="card-kicker">{{ session.starts_at|time:"H:i" }}–{{ session.ends_at|time:"H:i" }} · {{ session.location }}</p>
+            <h2 class="card-title">{{ session.animation.title }}</h2>
+            <p class="planning-card-summary">{{ session.animation.short_description }}</p>
+            {% if session.animation.recommended_levels.exists %}<p class="planning-card-levels"><strong>Niveaux :</strong> {% for level in session.animation.recommended_levels.all %}{{ level }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+            <p id="capacity-{{ session.pk }}" class="capacity"><strong>{{ session.remaining_capacity }}</strong> place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }} sur {{ session.max_capacity }}</p>
+            <div class="session-allocation" role="group" aria-labelledby="allocation-title-{{ session.pk }}">
+              <p id="allocation-title-{{ session.pk }}" class="session-allocation-title">Participants à inscrire</p>
+              {% if removal_required %}<p class="alert alert-warning">Cette animation n’est plus disponible. Utilisez « Retirer » pour supprimer sa réservation actuelle.</p>{% endif %}
+              <p id="allocation-help-{{ session.pk }}" class="helptext">Saisissez une partie du groupe · 0 élève = animation non réservée.</p>
+              <div class="session-allocation-fields">
+                <div class="session-allocation-field">{{ student_field.label_tag }} {{ student_field }} {{ student_field.errors }}</div>
+                <div class="session-allocation-field">{{ chaperone_field.label_tag }} {{ chaperone_field }} {{ chaperone_field.errors }}</div>
+              </div>
+              <div class="session-allocation-actions">
+                <button
+                  type="button"
+                  class="button-quiet"
+                  data-fill-full-group
+                  data-student-target="{{ student_field.id_for_label }}"
+                  data-chaperone-target="{{ chaperone_field.id_for_label }}"
+                  data-student-count="{{ registration.student_count }}"
+                  data-chaperone-count="{{ registration.chaperone_count }}"
+                  {% if not can_fill_full %}disabled title="La capacité disponible ne permet pas d’inscrire tout le groupe."{% endif %}
+                >Tout le groupe ({{ registration.total_participant_count }})</button>
+                <button
+                  type="button"
+                  class="button-quiet"
+                  data-clear-group
+                  data-student-target="{{ student_field.id_for_label }}"
+                  data-chaperone-target="{{ chaperone_field.id_for_label }}"
+                  {% if not allocation_editable %}disabled{% endif %}
+                >Retirer</button>
+              </div>
+            </div>
+          </article>
+        {% endwith %}
+      {% empty %}<p class="alert alert-warning">Aucun créneau ne correspond à ces filtres.</p>{% endfor %}
+    </div>
 
     <div class="actions">
-      <button type="submit">{% if is_rescheduling %}Appliquer le changement de jour{% elif registration.status == "DRAFT" %}Vérifier l’inscription{% else %}Enregistrer et prévenir le professeur{% endif %}</button>
+      <button type="submit">{% if is_rescheduling %}Enregistrer les modifications{% elif registration.status == "DRAFT" %}Vérifier l’inscription{% else %}Enregistrer et prévenir le professeur{% endif %}</button>
       {% if is_rescheduling %}
-        <button class="button-secondary" type="submit" name="action" value="cancel-reschedule" formnovalidate>Abandonner le changement</button>
+        <button class="button-secondary" type="submit" name="action" value="cancel-reschedule" formnovalidate>Abandonner les modifications</button>
       {% else %}
         <a class="button button-secondary" href="{% url 'operations:registration-detail' registration.reference %}">Retour à la fiche</a>
       {% endif %}
     </div>
   </form>
+  <script src="{% static 'js/auto-submit-filters.js' %}" defer></script>
+  <script src="{% static 'js/partial-group-planning.js' %}" defer></script>
 {% endblock %}

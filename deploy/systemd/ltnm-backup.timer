@@ -1,0 +1,11 @@
+[Unit]
+Description=Sauvegarde quotidienne des réservations LTNM
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=ltnm-backup.service
+
+[Install]
+WantedBy=timers.target

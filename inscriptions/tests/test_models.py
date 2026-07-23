@@ -6,7 +6,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 
 from catalogue.models import Animation, Category, SchoolLevel, Session
-from inscriptions.codes import generate_unique_group_code
+from inscriptions.codes import generate_group_code_candidate, generate_unique_group_code
 from inscriptions.models import (
     GroupFamily,
     Institution,
@@ -62,11 +62,17 @@ class GroupModelTests(TestCase):
             generated = self.make_registration("1")
         supplied = self.make_registration("2", group_code="Truffe Dorée")
 
-        self.assertRegex(generated.group_code, r"^[a-z]+-[a-z]+$")
+        self.assertRegex(generated.group_code, r"^[a-z]+(?:-[a-z]+)+$")
         self.assertEqual(supplied.group_code, "truffe-doree")
         self.assertNotEqual(generated.group_code, supplied.group_code)
         with self.assertRaises(IntegrityError), transaction.atomic():
             self.make_registration("3", group_code="Truffe Dorée")
+
+    def test_generated_candidate_uses_three_words_for_a_large_code_space(self):
+        self.assertRegex(
+            generate_group_code_candidate(),
+            r"^[a-z]+-[a-z]+-[a-z]+$",
+        )
 
     def test_unique_code_suggestion_skips_an_existing_combination(self):
         self.make_registration("4", group_code="truffe-dore")

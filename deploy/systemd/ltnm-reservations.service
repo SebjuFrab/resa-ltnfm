@@ -1,0 +1,17 @@
+[Unit]
+Description=Réservations La Terre est Notre Métier
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/resa-ltnfm
+ExecStart=/usr/bin/docker compose --project-directory /opt/resa-ltnfm --env-file /opt/resa-ltnfm/.env.production --file /opt/resa-ltnfm/compose.production.yaml up --detach --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose --project-directory /opt/resa-ltnfm --env-file /opt/resa-ltnfm/.env.production --file /opt/resa-ltnfm/compose.production.yaml stop
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

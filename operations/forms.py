@@ -4,6 +4,7 @@ from pathlib import Path
 from django import forms
 from django.conf import settings
 from django.db.models import Q
+from django.utils import timezone
 
 from catalogue.models import Category, SchoolLevel, Session
 from inscriptions.choices import department_form_choices
@@ -14,6 +15,25 @@ from inscriptions.models import GroupFamily, Institution, Registration, Reservat
 class SessionImportForm(forms.Form):
     file = forms.FileField(
         label="Fichier CSV des animations",
+        help_text=(
+            "UTF-8 ou Windows-1252, séparateur point-virgule conseillé, "
+            "500 lignes et 2 Mo maximum."
+        ),
+        widget=forms.ClearableFileInput(attrs={"accept": ".csv,text/csv"}),
+    )
+
+    def clean_file(self):
+        upload = self.cleaned_data["file"]
+        if Path(upload.name).suffix.lower() != ".csv":
+            raise forms.ValidationError("Sélectionnez un fichier portant l'extension .csv.")
+        if upload.size > 2 * 1024 * 1024:
+            raise forms.ValidationError("Le fichier ne doit pas dépasser 2 Mo.")
+        return upload
+
+
+class GroupImportForm(forms.Form):
+    file = forms.FileField(
+        label="Fichier CSV des groupes",
         help_text=(
             "UTF-8 ou Windows-1252, séparateur point-virgule conseillé, "
             "500 lignes et 2 Mo maximum."
@@ -107,17 +127,22 @@ class AnimationFilterForm(forms.Form):
         label="Places disponibles uniquement", required=False
     )
 
-    def __init__(self, *args, fixed_date=None, **kwargs):
+    def __init__(self, *args, fixed_date=None, include_taxonomy=True, **kwargs):
         super().__init__(*args, **kwargs)
         self.fixed_date = fixed_date
+        self.include_taxonomy = include_taxonomy
         self.fields["date"].choices = [("", "Tous les jours")] + [
             (value, date.fromisoformat(value).strftime("%d/%m/%Y"))
             for value in settings.EVENT_DATES
         ]
         if fixed_date:
             self.fields.pop("date")
-        self.fields["category"].queryset = Category.objects.filter(is_active=True)
-        self.fields["level"].queryset = SchoolLevel.objects.filter(is_active=True)
+        if include_taxonomy:
+            self.fields["category"].queryset = Category.objects.filter(is_active=True)
+            self.fields["level"].queryset = SchoolLevel.objects.filter(is_active=True)
+        else:
+            self.fields.pop("category")
+            self.fields.pop("level")
         self.fields["status"].choices = [("", "Tous")] + list(Session.Status.choices)
 
     def apply(self, queryset):
@@ -147,7 +172,7 @@ class AnimationFilterForm(forms.Form):
             queryset = queryset.filter(status=status)
         if self.cleaned_data.get("available_only"):
             queryset = queryset.filter(_remaining_capacity__gt=0)
-        return queryset.distinct()
+        return queryset.distinct() if self.include_taxonomy else queryset
 
 
 class StaffRegistrationForm(forms.Form):
@@ -291,8 +316,7 @@ class StaffRegistrationForm(forms.Form):
 
 
 class StaffPlanningForm(forms.Form):
-    def __init__(self, *args, registration, sessions, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, registration, sessions, capacity_at=None, **kwargs):
         self.registration = registration
         self.sessions = list(sessions)
         current = {
@@ -301,42 +325,180 @@ class StaffPlanningForm(forms.Form):
                 status=Reservation.Status.ACTIVE
             )
         }
+        if args and args[0] is not None:
+            data = args[0].copy()
+            for session in self.sessions:
+                reservation = current.get(session.pk)
+                student_field_name = self.student_field_name(session.pk)
+                chaperone_field_name = self.chaperone_field_name(session.pk)
+                if (
+                    reservation
+                    and student_field_name not in data
+                    and chaperone_field_name not in data
+                ):
+                    data[student_field_name] = reservation.student_count
+                    data[chaperone_field_name] = reservation.chaperone_count
+            args = (data, *args[1:])
+        super().__init__(*args, **kwargs)
+        capacity_at = capacity_at or timezone.now()
+        registration_holds_capacity = (
+            registration.status == Registration.Status.CONFIRMED
+            or (
+                registration.status == Registration.Status.DRAFT
+                and registration.draft_expires_at is not None
+                and registration.draft_expires_at > capacity_at
+            )
+        )
         group_total = registration.total_participant_count
+        self.session_options = {}
         for session in self.sessions:
             reservation = current.get(session.pk)
             currently_selected = reservation is not None
-            recoverable = reservation.total_participant_count if reservation else 0
-            available_for_group = session.remaining_capacity + recoverable
-            selectable = (
+            recoverable = (
+                reservation.total_participant_count
+                if reservation and registration_holds_capacity
+                else 0
+            )
+            available_for_group = max(0, session.remaining_capacity + recoverable)
+            removal_required = currently_selected and (
+                not session.animation.is_active
+                or session.status == Session.Status.CANCELLED
+            )
+            editable = (
                 currently_selected
                 or (
                     session.status == Session.Status.OPEN
                     and session.animation.is_active
-                    and available_for_group >= group_total
+                    and available_for_group > 0
                 )
             )
-            self.fields[self.field_name(session.pk)] = forms.BooleanField(
-                label=f"Réserver le groupe complet ({group_total} personnes)",
+            if currently_selected and session.status != Session.Status.OPEN:
+                student_maximum = reservation.student_count
+                chaperone_maximum = reservation.chaperone_count
+            else:
+                student_maximum = min(
+                    registration.student_count, available_for_group
+                )
+                chaperone_maximum = min(
+                    registration.chaperone_count, available_for_group
+                )
+            described_by = f"capacity-{session.pk} allocation-help-{session.pk}"
+            self.fields[self.student_field_name(session.pk)] = forms.IntegerField(
+                label="Élèves",
                 required=False,
-                initial=currently_selected,
-                disabled=not selectable,
-                widget=forms.CheckboxInput(
-                    attrs={"aria-describedby": f"capacity-{session.pk}"}
+                min_value=0,
+                max_value=student_maximum,
+                initial=reservation.student_count if reservation else 0,
+                disabled=not editable,
+                widget=forms.NumberInput(
+                    attrs={
+                        "inputmode": "numeric",
+                        "class": "reservation-count",
+                        "aria-describedby": described_by,
+                    }
                 ),
             )
+            self.fields[self.chaperone_field_name(session.pk)] = forms.IntegerField(
+                label="Accompagnateurs",
+                required=False,
+                min_value=0,
+                max_value=chaperone_maximum,
+                initial=reservation.chaperone_count if reservation else 0,
+                disabled=(
+                    not editable
+                    or (registration.chaperone_count == 0 and reservation is None)
+                ),
+                widget=forms.NumberInput(
+                    attrs={
+                        "inputmode": "numeric",
+                        "class": "reservation-count",
+                        "aria-describedby": described_by,
+                    }
+                ),
+            )
+            self.session_options[session.pk] = {
+                "available_for_group": available_for_group,
+                "editable": editable,
+                "removal_required": removal_required,
+                "can_fill_full_group": (
+                    session.status == Session.Status.OPEN
+                    and session.animation.is_active
+                    and group_total <= available_for_group
+                ),
+            }
 
     @staticmethod
-    def field_name(session_id):
-        return f"session_{session_id}"
+    def student_field_name(session_id):
+        return f"session_{session_id}_students"
 
-    def selected_session_ids(self):
+    @staticmethod
+    def chaperone_field_name(session_id):
+        return f"session_{session_id}_chaperones"
+
+    def clean(self):
+        cleaned = super().clean()
+        for session in self.sessions:
+            student_field_name = self.student_field_name(session.pk)
+            chaperone_field_name = self.chaperone_field_name(session.pk)
+            if (
+                student_field_name in self.errors
+                or chaperone_field_name in self.errors
+            ):
+                continue
+            student_count = cleaned.get(student_field_name) or 0
+            chaperone_count = cleaned.get(chaperone_field_name) or 0
+            if (
+                self.session_options[session.pk]["removal_required"]
+                and student_count + chaperone_count > 0
+            ):
+                self.add_error(
+                    student_field_name,
+                    "Cette animation n'est plus disponible : retirez cette réservation.",
+                )
+                continue
+            if student_count == 0 and chaperone_count > 0:
+                self.add_error(
+                    chaperone_field_name,
+                    "Indiquez au moins un élève pour réserver cette animation.",
+                )
+                continue
+            available = self.session_options[session.pk]["available_for_group"]
+            if student_count + chaperone_count > available:
+                self.add_error(
+                    student_field_name,
+                    f"Cette séance ne dispose que de {available} place(s) pour ce groupe.",
+                )
+        return cleaned
+
+    def requested_counts(self):
         if not self.is_valid():
             raise ValueError("Le formulaire doit être valide.")
-        return {
-            session.pk
-            for session in self.sessions
-            if self.cleaned_data.get(self.field_name(session.pk), False)
-        }
+        requested = {}
+        for session in self.sessions:
+            student_count = (
+                self.cleaned_data.get(self.student_field_name(session.pk)) or 0
+            )
+            if student_count <= 0:
+                continue
+            requested[session.pk] = (
+                student_count,
+                self.cleaned_data.get(self.chaperone_field_name(session.pk)) or 0,
+            )
+        return requested
+
+    def session_rows(self, sessions=None):
+        sessions = self.sessions if sessions is None else sessions
+        return [
+            (
+                session,
+                self[self.student_field_name(session.pk)],
+                self[self.chaperone_field_name(session.pk)],
+                self.session_options[session.pk]["can_fill_full_group"],
+                self.session_options[session.pk]["editable"],
+                self.session_options[session.pk]["removal_required"],
+            )
+            for session in sessions
+        ]
 
 
 class MailingForm(forms.Form):

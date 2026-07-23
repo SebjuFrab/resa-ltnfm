@@ -1,0 +1,11 @@
+[Unit]
+Description=Anonymisation quotidienne des anciennes inscriptions LTNM
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=ltnm-maintenance.service
+
+[Install]
+WantedBy=timers.target

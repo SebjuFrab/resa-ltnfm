@@ -35,9 +35,26 @@
         <button class="button button-quiet" type="button" data-command="insertUnorderedList">Liste</button>
         <button class="button button-quiet" type="button" data-command="createLink">Lien</button>
       </div>
+      <div class="editor-toolbar" role="toolbar" aria-label="Variables personnalisées">
+        <span>Insérer une variable :</span>
+        {% for variable in mailing_template_variables %}
+          <button
+            class="button button-quiet"
+            type="button"
+            data-template-variable="{{ variable.token }}"
+            title="{{ variable.description }}"
+          >{{ variable.label }}</button>
+        {% endfor %}
+      </div>
       <div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-labelledby="editor-label" aria-multiline="true">{{ editor_html|safe }}</div>
       <div hidden>{{ form.body_html }}</div>
       <p class="helptext">La mise en forme autorisée est nettoyée côté serveur avant tout envoi.</p>
+      <p class="helptext">
+        Variables disponibles :
+        {% for variable in mailing_template_variables %}<code>{{ variable.token }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+        Pour un responsable, le prénom est vide, le nom correspond au libellé du responsable et le nombre d’inscrits additionne les effectifs de ses séances.
+        Le récapitulatif détaillé reste automatiquement ajouté sous le message.
+      </p>
     </fieldset>
     <div class="actions">
       <button type="submit" name="action" value="preview">Actualiser l’aperçu</button>
@@ -56,6 +73,13 @@
         const value = command === "createLink" ? window.prompt("Adresse du lien (https://…)") : null;
         if (command !== "createLink" || value) document.execCommand(command, false, value);
         editor.focus();
+      });
+    });
+    document.querySelectorAll("[data-template-variable]").forEach((button) => {
+      button.addEventListener("mousedown", (event) => { event.preventDefault(); });
+      button.addEventListener("click", () => {
+        editor.focus();
+        document.execCommand("insertText", false, button.dataset.templateVariable);
       });
     });
     form.addEventListener("submit", () => { input.value = editor.innerHTML; });

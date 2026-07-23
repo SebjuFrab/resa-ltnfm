@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><title>{{ campaign.subject }}</title></head>
 <body>
   <p>Bonjour{% if delivery.recipient_name %} {{ delivery.recipient_name }}{% endif %},</p>
-  <div>{{ campaign.body_html|safe }}</div>
+  <div>{{ personalized_body_html|safe }}</div>
   <h2>Récapitulatif des groupes attendus</h2>
   {% for session in snapshot.sessions %}
     <h3>{{ session.date_label }} · {{ session.starts_at }}–{{ session.ends_at }} · {{ session.animation }}</h3>

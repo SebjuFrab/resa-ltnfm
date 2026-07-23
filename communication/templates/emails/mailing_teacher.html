@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><title>{{ campaign.subject }}</title></head>
 <body>
   <p>Bonjour {{ snapshot.registration.teacher_first_name }} {{ snapshot.registration.teacher_last_name }},</p>
-  <div>{{ campaign.body_html|safe }}</div>
+  <div>{{ personalized_body_html|safe }}</div>
   <h2>Récapitulatif de votre groupe</h2>
   <dl>
     <dt>Code du groupe</dt><dd><strong>{{ snapshot.registration.group_code }}</strong></dd>

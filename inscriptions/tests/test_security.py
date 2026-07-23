@@ -2,7 +2,7 @@ from django.core.cache import cache
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
 
-from inscriptions.security import rate_limit
+from inscriptions.security import _client_address, rate_limit
 
 
 @override_settings(
@@ -32,3 +32,28 @@ class RateLimitTests(SimpleTestCase):
         self.assertEqual(view(request).status_code, 200)
         self.assertEqual(view(request).status_code, 200)
 
+    @override_settings(TRUST_PROXY_HEADERS=True)
+    def test_uses_single_forwarded_address_from_trusted_proxy(self):
+        request = self.factory.post(
+            "/",
+            REMOTE_ADDR="127.0.0.1",
+            HTTP_X_FORWARDED_FOR="192.0.2.20",
+        )
+        other = self.factory.post(
+            "/",
+            REMOTE_ADDR="127.0.0.1",
+            HTTP_X_FORWARDED_FOR="192.0.2.21",
+        )
+
+        self.assertNotEqual(_client_address(request), _client_address(other))
+
+    @override_settings(TRUST_PROXY_HEADERS=True)
+    def test_rejects_forwarded_chain_instead_of_trusting_first_value(self):
+        forged = self.factory.post(
+            "/",
+            REMOTE_ADDR="127.0.0.1",
+            HTTP_X_FORWARDED_FOR="198.51.100.10, 192.0.2.20",
+        )
+        direct = self.factory.post("/", REMOTE_ADDR="127.0.0.1")
+
+        self.assertEqual(_client_address(forged), _client_address(direct))

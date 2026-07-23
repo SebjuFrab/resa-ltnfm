@@ -78,6 +78,10 @@ if env("POSTGRES_HOST"):
             "HOST": env("POSTGRES_HOST", "localhost"),
             "PORT": env("POSTGRES_PORT", "5432"),
             "CONN_MAX_AGE": 60,
+            "CONN_HEALTH_CHECKS": True,
+            "OPTIONS": {
+                "connect_timeout": int(env("POSTGRES_CONNECT_TIMEOUT", 5)),
+            },
         }
     }
 else:
@@ -147,6 +151,7 @@ if redis_url := env("REDIS_URL"):
             "BACKEND": "django_redis.cache.RedisCache",
             "LOCATION": redis_url,
             "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+            "KEY_PREFIX": env("CACHE_KEY_PREFIX", "ltnm"),
         }
     }
 

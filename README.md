@@ -10,8 +10,8 @@ L’édition configurée par défaut se déroule les **23 et 24 septembre 2026**
 
 1. Le salarié se connecte avec un compte Django `is_staff` disposant des permissions nécessaires.
 2. Depuis `/operations/groupes/nouveau/`, il saisit les informations communiquées par le professeur.
-3. L’application propose un code de groupe unique fondé sur un nom d’aliment, par exemple `truffe`. Le salarié peut demander une autre proposition ou saisir un autre code disponible.
-4. Le salarié filtre les séances du jour puis sélectionne les animations. Le groupe complet est affecté à chaque séance retenue.
+3. L’application propose un code de groupe unique composé de noms d’aliments, par exemple `truffe-pomme-doree`. Le salarié peut demander une autre proposition ou saisir un autre code disponible.
+4. Le salarié filtre les séances du jour puis indique, pour chaque animation, le nombre d’étudiants et d’accompagnateurs présents. Un raccourci permet d’affecter tout le groupe.
 5. Après vérification, il confirme l’inscription. Le professeur reçoit un courriel récapitulatif en texte et HTML.
 6. Le salarié peut ensuite modifier les coordonnées, l’effectif ou le planning. Une inscription confirmée modifiée déclenche un nouveau courriel récapitulatif au professeur.
 7. Avant le salon, l’équipe peut préparer un publipostage final. Chaque professeur reçoit les informations générales avec le récapitulatif de son groupe ; chaque responsable d’animation reçoit une synthèse des groupes attendus.
@@ -43,8 +43,8 @@ Les paramètres initiaux couvrent les lycées agricoles, professionnels, génér
 | --- | --- |
 | Accès | Le parcours courant est réservé aux salariés authentifiés et contrôlé par les permissions Django. |
 | Capacité | Les étudiants **et** les professeurs/accompagnateurs consomment la jauge de chaque séance. |
-| Affectation | Une séance sélectionnée réserve le groupe complet ; l’effectif n’est pas réparti entre plusieurs animations. |
-| Planning | Les périodes sans animation sont autorisées. Deux séances adjacentes sont compatibles ; deux séances qui se chevauchent ne peuvent pas accueillir le même groupe complet. |
+| Affectation | Chaque séance peut recevoir tout le groupe ou seulement une partie, avec des effectifs étudiants et accompagnateurs distincts. Zéro étudiant retire la réservation. |
+| Planning | Les périodes sans animation sont autorisées. Sur des séances qui se chevauchent, la somme des étudiants et celle des accompagnateurs ne peuvent pas dépasser les effectifs du groupe. |
 | Brouillon | Une inscription en cours immobilise ses places pendant 60 minutes. L’enregistrement du planning renouvelle ce délai. |
 | Identifiants | L’UUID technique reste non séquentiel. Le code alimentaire est l’identifiant court, lisible et unique du groupe. |
 | Courriels | Les envois transactionnels sont programmés après validation de la transaction. Un échec SMTP n’annule pas l’inscription et reste journalisé. |
@@ -76,13 +76,13 @@ La page `/operations/animations/` présente les séances et leur disponibilité.
 
 - recherche dans le titre, la description, le lieu, le responsable ou son courriel ;
 - jour ;
-- catégorie ;
-- niveau conseillé ;
 - heure minimale et heure maximale ;
 - statut de la séance ;
 - séances ayant encore des places uniquement.
 
-Les mêmes filtres sont proposés lors du choix du planning d’un groupe, avec le jour de visite déjà fixé.
+Sur cette page et lors du choix du planning d’un groupe, les résultats se mettent à jour automatiquement : immédiatement pour les listes, horaires et cases, et après une courte pause pour la recherche. Aucun bouton d’application n’est nécessaire. Le planning reprend les mêmes filtres, sauf le jour qui est déjà fixé par le groupe.
+
+Après chaque filtrage, la page restaure sa position de défilement. Sur le planning d’un groupe, les effectifs saisis mais pas encore enregistrés sont conservés temporairement dans la session du navigateur et fusionnés lors de l’enregistrement final, y compris lorsqu’une animation est masquée par le filtre.
 
 ### Création et modification d’une inscription
 
@@ -105,11 +105,12 @@ La page `/operations/publipostage/` permet de :
 - prévisualiser le nombre de professeurs et de responsables concernés ;
 - signaler les adresses manquantes et exiger une confirmation explicite avant un envoi incomplet ;
 - saisir un objet et un message général dans un éditeur enrichi ;
+- insérer dans ce message les variables `{{ prenom }}`, `{{ nom }}`, `{{ programme }}` et `{{ nombre_inscrits }}` ;
 - envoyer un message personnalisé à chaque professeur ;
 - envoyer à chaque adresse de responsable une synthèse consolidée de ses séances et des groupes attendus ;
 - consulter ensuite le statut détaillé de chaque livraison.
 
-Le HTML saisi est nettoyé côté serveur par liste blanche. Le publipostage accepte les paragraphes, titres simples, listes, citations, gras, italique, soulignement et liens `http`, `https` ou `mailto`. Sans filtre de jour, seuls les jours configurés dans `EVENT_DATES` sont inclus et les dossiers anonymisés sont toujours exclus. Le système génère aussi une version texte et protège l’envoi contre une double soumission grâce à une clé d’idempotence.
+Le HTML saisi est nettoyé côté serveur par liste blanche. Le publipostage accepte les paragraphes, titres simples, listes, citations, gras, italique, soulignement et liens `http`, `https` ou `mailto`. Les variables sont remplacées à partir du contexte figé de chaque destinataire et toute variable inconnue bloque l’envoi. `nombre_inscrits` représente l’effectif total, accompagnateurs compris ; pour un responsable, il additionne les effectifs de ses séances et `prenom` reste vide. Le récapitulatif détaillé est toujours ajouté automatiquement sous le message personnalisé. Sans filtre de jour, seuls les jours configurés dans `EVENT_DATES` sont inclus et les dossiers anonymisés sont toujours exclus. Le système génère aussi une version texte et protège l’envoi contre une double soumission grâce à une clé d’idempotence.
 
 Pour qu’un responsable reçoive le publipostage, son courriel doit être renseigné sur la séance, directement ou via l’import CSV.
 
@@ -126,6 +127,25 @@ L’administration `/admin/` permet, selon les permissions accordées, de gérer
 - les campagnes et livraisons de publipostage.
 
 Les modifications métier d’une inscription doivent passer par l’interface opérationnelle, qui applique les services transactionnels et les contrôles de capacité.
+
+## Import CSV des groupes
+
+L’import des groupes se trouve sous `/operations/import/groupes/`. Il affiche d’abord un aperçu complet et les erreurs de chaque ligne, sans écrire en base. La confirmation revalide ensuite le contenu et crée tout le fichier dans une transaction unique. Un modèle CSV UTF-8 prêt à compléter est disponible sur la page ou directement sous `/operations/import/groupes/modele.csv`.
+
+```csv
+nom_enseignant;prenom_enseignant;email_enseignant;telephone_enseignant;etablissement;type_etablissement;commune;departement;code_groupe;famille;niveau;jour;nb_etudiants;nb_accompagnateurs;effectif_total;remarque_niveau;remarque_generale
+```
+
+Toutes les colonnes sont obligatoires sauf `remarque_niveau` et `remarque_generale`. Le `code_groupe` doit être unique et ne peut pas être vide : il rend l’import rejouable sans recréer silencieusement les mêmes groupes. `effectif_total` doit être exactement égal à `nb_etudiants + nb_accompagnateurs` et sert de contrôle de cohérence.
+
+- `type_etablissement` accepte un code Django tel que `AGRICULTURAL`, `HIGH_SCHOOL`, `HIGHER_EDUCATION` ou `OTHER`, ainsi que son libellé français ;
+- `famille` accepte le slug ou le nom d’une famille active ;
+- `niveau` accepte le code ou le libellé d’un niveau actif ;
+- `jour` accepte le nom d’un jour du salon ou une date configurée ;
+- le département doit appartenir à la liste proposée par l’application ;
+- les établissements et enseignants strictement identiques sont réutilisés, sans écraser silencieusement une fiche existante.
+
+Les groupes importés sont des **brouillons sans animation**. Ils ne consomment aucune jauge et aucun courriel n’est envoyé pendant l’import. Le salarié ouvre ensuite chaque groupe, choisit ses animations et utilise la confirmation habituelle ; les contrôles de capacité et l’envoi du récapitulatif s’appliquent alors normalement.
 
 ## Import CSV des animations et séances
 
@@ -195,6 +215,8 @@ Les capacités incluent les étudiants et les accompagnateurs, ainsi que les ret
 | `/operations/groupes/<uuid>/renvoyer/` | staff + droits complets du parcours interne | renvoi du récapitulatif |
 | `/operations/publipostage/` | staff + `communication.send_mailing` | aperçu et envoi final |
 | `/operations/publipostage/<id>/` | staff + `communication.send_mailing` | détail d’une campagne |
+| `/operations/import/groupes/` | staff + droits complets du parcours interne | aperçu et import atomique des groupes |
+| `/operations/import/groupes/modele.csv` | staff + droits complets du parcours interne | modèle CSV des groupes |
 | `/operations/import/seances/` | staff + ajout animation et séance | import CSV en deux étapes |
 | `/operations/import/seances/modele.csv` | staff + ajout animation et séance | modèle CSV téléchargeable |
 | `/operations/exports/telecharger/` | staff + permissions des données exportées | téléchargement d’un export choisi |
@@ -228,6 +250,7 @@ inscriptions/
   services/registration.py    cycle de vie transactionnel des inscriptions
   models.py                   groupes, familles, établissements, professeurs et audit
 operations/
+  group_imports.py            aperçu et import atomique des groupes
   imports.py                  aperçu et import atomique des animations/séances
   exports.py                  exports CSV
   forms.py, views.py, urls.py parcours interne FRAB
@@ -290,7 +313,7 @@ $env:EMAIL_FILE_PATH = "var/emails"
 python manage.py runserver 8001
 ```
 
-Le backend de développement écrit les messages dans `var/emails/`. Configurer SMTP pour des envois réels.
+Le backend de développement écrit les messages dans `var/emails/`. Ces fichiers contiennent le corps des courriels et parfois des liens sensibles : ne jamais les archiver, les partager ou les copier en production. Configurer SMTP pour des envois réels.
 
 ## Installation avec Docker Compose
 
@@ -305,7 +328,7 @@ docker compose exec web python manage.py createsuperuser
 docker compose exec web python manage.py seed_demo
 ```
 
-L’application est alors disponible sur <http://localhost:8000/>. Les données PostgreSQL restent dans le volume `postgres_data` après `docker compose down`.
+L’application est alors disponible sur <http://localhost:8000/>. Les données PostgreSQL restent dans le volume logique `postgres_data` après `docker compose down`; son nom Docker réel est préfixé par le projet Compose. En production il s'agit par défaut de `ltnm_resa_postgres_data`.
 
 Commandes utiles :
 
@@ -375,11 +398,13 @@ $env:POSTGRES_PASSWORD = "mot-de-passe-local"
 python -m pytest
 ```
 
-La suite couvre notamment les modèles, la génération des codes, les familles, les capacités incluant les accompagnateurs, les services transactionnels, le parcours interne, l’import atomique, les exports, les courriels et le publipostage.
+La suite couvre notamment les modèles, la génération des codes, les familles, les capacités incluant les accompagnateurs, les services transactionnels, le parcours interne, les imports atomiques des groupes et des animations, les exports, les courriels et le publipostage.
 
 ## Mise en production
 
-`compose.yaml` utilise `runserver` et vise le développement. `compose.production.yaml` lance les migrations, collecte les fichiers statiques puis démarre Gunicorn. Il doit être placé derrière un reverse proxy HTTPS.
+`compose.yaml` utilise `runserver` et vise le développement. Pour Debian, la pile de production isole Gunicorn, PostgreSQL et Redis sous le projet Compose `ltnm_resa`; elle ne publie Gunicorn que sur `127.0.0.1:18001` afin de cohabiter avec les autres services du serveur. Les migrations et la collecte des statiques sont exécutées par une étape de release séparée du démarrage web.
+
+La procédure complète et directement adaptée à `https://resa-ltnfm.agrobio-bretagne.org` se trouve dans [deploy/README.md](deploy/README.md). Elle couvre l'installation Docker sur Debian, Nginx/HTTPS, les secrets, les healthchecks, systemd, les sauvegardes, l'anonymisation, les mises à jour et le retour arrière.
 
 Avant le déploiement :
 
@@ -472,7 +497,7 @@ Un brouillon actif peut retenir les places de tous ses participants pendant 60 m
 - pas d’export XLSX ;
 - pas de relance automatique des envois SMTP en échec ;
 - pas de traitement automatique des groupes lorsqu’une séance est annulée ;
-- pas de planification intégrée de l’anonymisation ; utiliser cron ou un ordonnanceur ;
+- pas d’ordonnanceur dans Django ; le déploiement Debian fournit un timer systemd pour l’anonymisation ;
 - pas de file de tâches asynchrone ;
 - pas d’API publique ni d’application JavaScript séparée ;
 - pas de suivi nominatif des étudiants.

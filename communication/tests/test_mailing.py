@@ -221,9 +221,13 @@ class MailingTests(TestCase):
         self.assertIn("Bienvenue", campaign.body_text)
 
     def test_send_is_individual_personalized_and_idempotent(self):
+        personalized_body = (
+            "<p>Variables : {{ prenom }}|{{ nom }}|{{ nombre_inscrits }}</p>"
+            "<p>Programme variable : {{ programme }}</p>"
+        )
         first = create_and_send_mailing(
             subject="Dernières informations",
-            body_html="<p>Présentez-vous à l’accueil.</p>",
+            body_html=personalized_body,
             created_by=self.user,
             idempotency_key="mailing-final-2026",
         )
@@ -243,12 +247,26 @@ class MailingTests(TestCase):
         )
         self.assertIn(self.first_registration.group_code, teacher_message.body)
         self.assertIn("Effectif total : 26", teacher_message.body)
+        self.assertIn("Variables : Prénom a|Nom a|26", teacher_message.body)
+        self.assertIn(
+            "23/09/2026 · 10:00–10:45 · Le sol vivant — Pôle sols",
+            teacher_message.body,
+        )
         self.assertIn(self.first_registration.group_code, organizer_message.body)
         self.assertIn(self.second_registration.group_code, organizer_message.body)
+        self.assertIn(
+            "Variables : |Équipe graines, Équipe sols|47",
+            organizer_message.body,
+        )
+        self.assertIn(
+            "24/09/2026 · 11:00–11:30 · Les graines — Pôle graines",
+            organizer_message.body,
+        )
+        self.assertNotIn("{{ prenom }}", teacher_message.body)
 
         second = create_and_send_mailing(
             subject="Dernières informations",
-            body_html="<p>Présentez-vous à l’accueil.</p>",
+            body_html=personalized_body,
             created_by=self.user,
             idempotency_key="mailing-final-2026",
         )
@@ -256,6 +274,46 @@ class MailingTests(TestCase):
         self.assertEqual(MailingCampaign.objects.count(), 1)
         self.assertEqual(len(mail.outbox), 3)
         self.assertEqual(second.skipped_count, 3)
+
+    def test_template_variables_escape_html_and_use_frozen_snapshot(self):
+        teacher = self.first_registration.teacher
+        teacher.first_name = "<Marie>"
+        teacher.last_name = "Du & Pont"
+        teacher.save(update_fields=("first_name", "last_name"))
+        campaign = create_mailing_campaign(
+            subject="Informations",
+            body_html=(
+                "<p>{{ prenom }} {{ nom }} — {{ programme }} — "
+                "{{ nombre_inscrits }}</p>"
+            ),
+            visit_date=date(2026, 9, 23),
+        )
+
+        teacher.first_name = "Prénom modifié"
+        teacher.last_name = "Nom modifié"
+        teacher.save(update_fields=("first_name", "last_name"))
+        Animation.objects.filter(pk=self.first_session.animation_id).update(
+            title="Animation modifiée"
+        )
+
+        send_mailing_campaign(campaign)
+
+        message = next(
+            message for message in mail.outbox if message.to == ["prof-a@example.test"]
+        )
+        html_body = message.alternatives[0].content
+        self.assertIn("&lt;Marie&gt; Du &amp; Pont", html_body)
+        self.assertIn("Le sol vivant", html_body)
+        self.assertIn("26", html_body)
+        self.assertNotIn("Prénom modifié", html_body)
+        self.assertNotIn("Animation modifiée", html_body)
+
+    def test_unknown_template_variable_is_rejected(self):
+        with self.assertRaisesMessage(ValueError, "Variable de publipostage inconnue"):
+            create_mailing_campaign(
+                subject="Informations",
+                body_html="<p>Bonjour {{ adresse_email }}</p>",
+            )
 
     @patch("communication.mailing.EmailMultiAlternatives.send")
     def test_failures_are_logged_and_only_explicitly_retried(self, mocked_send):

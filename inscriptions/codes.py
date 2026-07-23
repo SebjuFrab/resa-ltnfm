@@ -103,9 +103,12 @@ def normalize_group_code(value: str) -> str:
 
 def generate_group_code_candidate() -> str:
     """Construit une combinaison alimentaire lisible, sans numéro séquentiel."""
-    food = secrets.choice(FOOD_NAMES)
+    first_food = secrets.choice(FOOD_NAMES)
+    second_food = secrets.choice(
+        tuple(food for food in FOOD_NAMES if food != first_food)
+    )
     qualifier = secrets.choice(QUALIFIERS)
-    return normalize_group_code(f"{food}-{qualifier}")
+    return normalize_group_code(f"{first_food}-{second_food}-{qualifier}")
 
 
 def generate_unique_group_code(*, excluding_registration_id=None) -> str:

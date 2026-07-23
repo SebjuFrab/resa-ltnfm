@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Animations et disponibilités — LTNM{% endblock %}
 
@@ -14,18 +15,19 @@
     {% endif %}
   </div>
 
-  <form method="get" class="filters" aria-label="Filtres des animations">
+  <form method="get" class="filters" aria-label="Filtres des animations" data-auto-submit-filters>
     <fieldset>
       <legend>Filtrer les animations</legend>
       <div class="form-grid form-grid-3">{{ filter_form.as_p }}</div>
       <div class="actions">
-        <button type="submit">Appliquer les filtres</button>
-        <a class="button button-secondary" href="{% url 'operations:animation-list' %}">Effacer</a>
+        <a class="button button-secondary" href="{% url 'operations:animation-list' %}" data-clear-filters>Effacer</a>
       </div>
+      <p class="helptext">Les résultats se mettent à jour automatiquement.</p>
     </fieldset>
   </form>
+  <script src="{% static 'js/auto-submit-filters.js' %}" defer></script>
 
-  <p class="results-count"><strong>{{ sessions|length }}</strong> créneau{{ sessions|length|pluralize }} affiché{{ sessions|length|pluralize }}.</p>
+  <p class="results-count"><strong>{{ sessions|length }}</strong> créneau{% if sessions|length > 1 %}x{% endif %} affiché{{ sessions|length|pluralize }}.</p>
   <div class="cards session-grid">
     {% for session in sessions %}
       <article class="card{% if session.remaining_capacity == 0 %} session-full{% endif %}">

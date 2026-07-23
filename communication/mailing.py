@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
+from html import escape as escape_html
 
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist, ValidationError
@@ -19,6 +21,42 @@ from inscriptions.models import Registration, Reservation
 from .models import MailingCampaign, MailingDelivery
 from .rich_text import rich_html_to_text, sanitize_rich_html
 from .services import _safe_error_summary
+
+MAILING_TEMPLATE_VARIABLES = (
+    {
+        "name": "prenom",
+        "token": "{{ prenom }}",
+        "label": "Prénom",
+        "description": "Prénom du professeur ; vide pour un responsable d’animation.",
+    },
+    {
+        "name": "nom",
+        "token": "{{ nom }}",
+        "label": "Nom",
+        "description": (
+            "Nom du professeur ou nom complet du responsable d’animation."
+        ),
+    },
+    {
+        "name": "programme",
+        "token": "{{ programme }}",
+        "label": "Programme",
+        "description": "Séances réservées avec horaires, animation et lieu.",
+    },
+    {
+        "name": "nombre_inscrits",
+        "token": "{{ nombre_inscrits }}",
+        "label": "Nombre d’inscrits",
+        "description": (
+            "Effectif total, accompagnateurs compris ; somme des effectifs "
+            "par séance pour un responsable."
+        ),
+    },
+)
+_ALLOWED_TEMPLATE_VARIABLES = frozenset(
+    variable["name"] for variable in MAILING_TEMPLATE_VARIABLES
+)
+_TEMPLATE_VARIABLE_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +374,21 @@ def _validated_content(subject, body_html):
     body_text = rich_html_to_text(cleaned_html)
     if not body_text:
         raise ValueError("Le contenu du publipostage est obligatoire.")
+    unknown_variables = sorted(
+        {
+            match.group(1).strip()
+            for match in _TEMPLATE_VARIABLE_PATTERN.finditer(cleaned_html)
+            if match.group(1).strip() not in _ALLOWED_TEMPLATE_VARIABLES
+        }
+    )
+    if unknown_variables:
+        available = ", ".join(
+            variable["token"] for variable in MAILING_TEMPLATE_VARIABLES
+        )
+        raise ValueError(
+            "Variable de publipostage inconnue : "
+            f"{{{{ {unknown_variables[0]} }}}}. Variables disponibles : {available}."
+        )
     return subject, cleaned_html, body_text
 
 
@@ -429,11 +482,85 @@ def create_mailing_campaign(
     return campaign
 
 
+def _programme_lines(delivery):
+    snapshot = delivery.context_snapshot
+    if delivery.recipient_kind == MailingDelivery.RecipientKind.TEACHER:
+        reservations = snapshot.get("registration", {}).get("reservations", [])
+        return [
+            (
+                f"{reservation.get('date_label', '')} · "
+                f"{reservation.get('starts_at', '')}–{reservation.get('ends_at', '')} · "
+                f"{reservation.get('animation', '')} — {reservation.get('location', '')}"
+            ).strip()
+            for reservation in reservations
+        ]
+    return [
+        (
+            f"{session.get('date_label', '')} · "
+            f"{session.get('starts_at', '')}–{session.get('ends_at', '')} · "
+            f"{session.get('animation', '')} — {session.get('location', '')}"
+        ).strip()
+        for session in snapshot.get("sessions", [])
+    ]
+
+
+def _template_values(delivery):
+    snapshot = delivery.context_snapshot
+    programme_lines = _programme_lines(delivery)
+    if not programme_lines:
+        programme_lines = ["Aucun programme réservé."]
+    if delivery.recipient_kind == MailingDelivery.RecipientKind.TEACHER:
+        registration = snapshot.get("registration", {})
+        first_name = str(registration.get("teacher_first_name", "") or "")
+        last_name = str(registration.get("teacher_last_name", "") or "")
+        registered_count = int(registration.get("total_count", 0) or 0)
+    else:
+        first_name = ""
+        last_name = delivery.recipient_name
+        registered_count = sum(
+            int(session.get("total_count", 0) or 0)
+            for session in snapshot.get("sessions", [])
+        )
+    return {
+        "prenom": first_name,
+        "nom": str(last_name or ""),
+        "programme": programme_lines,
+        "nombre_inscrits": str(registered_count),
+    }
+
+
+def _personalize_content(value, values, *, html=False):
+    def replace(match):
+        name = match.group(1).strip()
+        if name not in values:
+            # Older campaigns may contain literal double braces created before
+            # variables were introduced. Keep them readable on an explicit retry.
+            return match.group(0)
+        replacement = values[name]
+        if name == "programme":
+            lines = [str(line) for line in replacement]
+            if html:
+                return "<br>".join(escape_html(line, quote=True) for line in lines)
+            return "\n".join(lines)
+        replacement = str(replacement)
+        return escape_html(replacement, quote=True) if html else replacement
+
+    personalized = _TEMPLATE_VARIABLE_PATTERN.sub(replace, str(value or ""))
+    return sanitize_rich_html(personalized) if html else personalized
+
+
 def _render_delivery(delivery):
+    values = _template_values(delivery)
     context = {
         "campaign": delivery.campaign,
         "delivery": delivery,
         "snapshot": delivery.context_snapshot,
+        "personalized_body_html": _personalize_content(
+            delivery.campaign.body_html, values, html=True
+        ),
+        "personalized_body_text": _personalize_content(
+            delivery.campaign.body_text, values
+        ),
     }
     template = (
         "mailing_teacher"

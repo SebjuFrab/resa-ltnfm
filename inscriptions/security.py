@@ -1,4 +1,5 @@
 import hashlib
+import ipaddress
 from functools import wraps
 
 from django.conf import settings
@@ -10,9 +11,14 @@ def _client_address(request):
     """Return a pseudonymous client key, trusting forwarding headers only by opt-in."""
     address = request.META.get("REMOTE_ADDR", "unknown")
     if settings.TRUST_PROXY_HEADERS:
-        forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
-        if forwarded:
-            address = forwarded.split(",", 1)[0].strip()
+        forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "").strip()
+        # The edge proxy must replace X-Forwarded-For with one address. A chain is
+        # rejected instead of trusting a client-controlled first value.
+        if forwarded and "," not in forwarded:
+            try:
+                address = str(ipaddress.ip_address(forwarded))
+            except ValueError:
+                pass
     return hashlib.sha256(address.encode("utf-8")).hexdigest()
 
 

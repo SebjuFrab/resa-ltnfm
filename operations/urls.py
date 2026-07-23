@@ -55,6 +55,12 @@ urlpatterns = [
         views.session_import_template,
         name="session-import-template",
     ),
+    path("import/groupes/", views.group_import, name="group-import"),
+    path(
+        "import/groupes/modele.csv",
+        views.group_import_template,
+        name="group-import-template",
+    ),
     path("exports/telecharger/", views.export_download, name="export-download"),
     path("exports/inscriptions.csv", views.export_registrations, name="export-registrations"),
     path("exports/reservations.csv", views.export_reservations, name="export-reservations"),

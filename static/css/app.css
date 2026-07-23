@@ -891,6 +891,113 @@ button.button-quiet:hover {
   cursor: pointer;
 }
 
+.session-allocation {
+  margin-top: 1rem;
+  padding-top: .9rem;
+  border-top: 1px solid var(--border);
+}
+
+.session-allocation-title {
+  margin: 0;
+  font-weight: 850;
+}
+
+.session-allocation-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: .4rem 1rem;
+}
+
+.session-allocation-field {
+  margin-block: .35rem;
+}
+
+.session-allocation-fields label {
+  margin-top: .3rem;
+}
+
+.session-allocation-fields input {
+  max-width: 9rem;
+}
+
+.session-allocation-actions {
+  display: flex;
+  margin-top: .7rem;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+
+.planning-session-grid {
+  align-items: start;
+}
+
+.planning-session-card {
+  padding: 1rem;
+}
+
+.planning-session-card .card-title {
+  margin-bottom: .45rem;
+  font-size: 1.08rem;
+}
+
+.planning-card-summary,
+.planning-card-levels {
+  margin-block: .3rem;
+  font-size: .84rem;
+  line-height: 1.42;
+}
+
+.planning-session-card .capacity {
+  margin-block: .65rem 0;
+  font-size: .84rem;
+}
+
+.planning-session-card .capacity strong {
+  font-size: 1.25em;
+}
+
+.planning-session-card .session-allocation {
+  margin-top: .65rem;
+  padding-top: .65rem;
+}
+
+.planning-session-card .session-allocation-title {
+  font-size: .84rem;
+}
+
+.planning-session-card .helptext {
+  margin-block: .2rem;
+  font-size: .74rem;
+  line-height: 1.35;
+}
+
+.planning-session-card .session-allocation-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .35rem .6rem;
+}
+
+.planning-session-card .session-allocation-fields label {
+  margin-top: .15rem;
+  font-size: .78rem;
+}
+
+.planning-session-card .session-allocation-fields input {
+  max-width: none;
+  min-height: 2.35rem;
+  padding: .42rem .55rem;
+}
+
+.planning-session-card .session-allocation-actions {
+  margin-top: .5rem;
+  gap: .4rem;
+}
+
+.planning-session-card .button-quiet {
+  min-height: 2.15rem;
+  padding: .38rem .58rem;
+  font-size: .62rem;
+}
+
 .timeline {
   max-width: none;
   margin: 0;
@@ -1007,6 +1114,14 @@ button.button-quiet:hover {
   .actions > input[type="submit"],
   .actions > form,
   .actions > form > button {
+    width: 100%;
+  }
+
+  .planning-session-card .session-allocation-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .planning-session-card .session-allocation-actions > button {
     width: 100%;
   }
 }

@@ -7,6 +7,7 @@
 
   <div class="actions">
     {% if can_manage_registrations %}<a class="button" href="{% url 'operations:registration-create' %}">Inscrire un groupe</a>{% endif %}
+    {% if can_manage_registrations %}<a class="button button-secondary" href="{% url 'operations:group-import' %}">Importer des groupes</a>{% endif %}
     {% if perms.catalogue.view_session %}<a class="button button-secondary" href="{% url 'operations:animation-list' %}">Voir les animations</a>{% endif %}
     {% if perms.catalogue.add_animation and perms.catalogue.add_session %}<a class="button" href="{% url 'operations:session-import' %}">Importer des séances</a>{% endif %}
     {% if perms.communication.send_mailing %}<a class="button" href="{% url 'operations:mailing-create' %}">Publipostage final</a>{% endif %}

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Importer des groupes — LTNM{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Inscriptions scolaires</p>
+  <h1>Importer des groupes</h1>
+  <p>Une ligne décrit un groupe et son professeur. L'import crée uniquement des <strong>brouillons</strong> : aucune animation n'est réservée et aucun courriel n'est envoyé. Après l'import, attribuez les animations puis confirmez chaque inscription pour envoyer son récapitulatif.</p>
+
+  {% if issues %}
+    <div class="alert alert-error" role="alert">
+      <h2>Le fichier contient des erreurs</h2>
+      <ul>
+        {% for issue in issues %}
+          <li>{% if issue.line %}Ligne {{ issue.line }} : {% endif %}{{ issue.message }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if preview.is_valid %}
+    <h2>Aperçu — {{ preview.rows|length }} groupe{{ preview.rows|length|pluralize }}</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Ligne</th>
+            <th scope="col">Code</th>
+            <th scope="col">Professeur</th>
+            <th scope="col">Établissement</th>
+            <th scope="col">Famille et niveau</th>
+            <th scope="col">Jour</th>
+            <th scope="col">Élèves</th>
+            <th scope="col">Accompagnateurs</th>
+            <th scope="col">Total</th>
+            <th scope="col">Remarques</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview.rows %}
+            <tr>
+              <td>{{ row.line }}</td>
+              <td><strong>{{ row.group_code }}</strong></td>
+              <td>
+                {{ row.teacher_first_name }} {{ row.teacher_last_name }}<br>
+                {{ row.teacher_email }}<br>
+                {{ row.teacher_phone }}
+              </td>
+              <td>
+                {{ row.institution_name }}<br>
+                {{ row.institution_type_label }} — {{ row.institution_city }} ({{ row.institution_department }})
+              </td>
+              <td>{{ row.family_name }}<br>{{ row.school_level_label }}</td>
+              <td>{{ row.visit_date|date:"d/m/Y" }}</td>
+              <td>{{ row.student_count }}</td>
+              <td>{{ row.chaperone_count }}</td>
+              <td><strong>{{ row.total_count }}</strong></td>
+              <td>
+                {% if row.level_comment %}<strong>Niveau :</strong> {{ row.level_comment }}{% endif %}
+                {% if row.level_comment and row.comment %}<br>{% endif %}
+                {% if row.comment %}<strong>Général :</strong> {{ row.comment }}{% endif %}
+                {% if not row.level_comment and not row.comment %}—{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="alert alert-info">La confirmation créera ces groupes comme brouillons. Il restera à choisir leurs animations et à confirmer leurs inscriptions.</p>
+    <div class="actions">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="confirm">
+        <button type="submit">Créer les brouillons</button>
+      </form>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="cancel">
+        <button class="button-secondary" type="submit">Abandonner</button>
+      </form>
+    </div>
+  {% else %}
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button type="submit">Vérifier le fichier</button>
+    </form>
+
+    <h2>Modèle et colonnes attendues</h2>
+    <p>
+      <a class="button button-secondary" href="{% url 'operations:group-import-template' %}">
+        Télécharger le modèle CSV
+      </a>
+    </p>
+    <p><code>nom_enseignant;prenom_enseignant;email_enseignant;telephone_enseignant;etablissement;type_etablissement;commune;departement;code_groupe;famille;niveau;jour;nb_etudiants;nb_accompagnateurs;effectif_total;remarque_niveau;remarque_generale</code></p>
+    <p>Toutes les colonnes sont obligatoires sauf <code>remarque_niveau</code> et <code>remarque_generale</code>. Le <code>code_groupe</code> doit être unique ; cette obligation empêche qu'un même fichier importé deux fois crée des doublons. L'<code>effectif_total</code> doit être égal au nombre d'étudiants additionné au nombre d'accompagnateurs.</p>
+    <ul>
+      <li><code>type_etablissement</code> : <code>AGRICULTURAL</code>, <code>HIGH_SCHOOL</code>, <code>HIGHER_EDUCATION</code> ou <code>OTHER</code>.</li>
+      <li><code>famille</code> : identifiant visible dans Paramètres, par exemple <code>lycee-agricole</code> ou <code>enseignement-superieur</code>.</li>
+      <li><code>niveau</code> : code visible dans Paramètres, par exemple <code>LYC_2DE</code> ou <code>SUP_LICENCE_BUT</code>.</li>
+      <li><code>jour</code> : <code>2026-09-23</code> ou <code>2026-09-24</code>.</li>
+    </ul>
+  {% endif %}
+
+  <p><a href="{% url 'operations:dashboard' %}">Retour au tableau de bord</a></p>
+{% endblock %}

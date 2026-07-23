@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import RedirectView
 
+from config.health import healthz, readyz
 from inscriptions.security import rate_limit
 
 admin_login = rate_limit(
@@ -11,6 +12,8 @@ admin_login = rate_limit(
 )(admin.site.login)
 
 urlpatterns = [
+    path("healthz/", healthz, name="healthz"),
+    path("readyz/", readyz, name="readyz"),
     path("admin/login/", admin_login, name="admin-login-limited"),
     path("admin/", admin.site.urls),
     path(

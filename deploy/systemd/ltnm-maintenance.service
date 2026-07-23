@@ -1,0 +1,11 @@
+[Unit]
+Description=Anonymisation des anciennes inscriptions LTNM
+Requires=docker.service ltnm-reservations.service
+After=docker.service ltnm-reservations.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/resa-ltnfm
+ExecStart=/opt/resa-ltnfm/deploy/debian/maintenance.sh
+TimeoutStartSec=30m
+Nice=10
