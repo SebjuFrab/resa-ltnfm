@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Importer des animations — LTNM{% endblock %}
+{% block title %}Importer des séances — LTNM{% endblock %}
 
 {% block content %}
   <p class="eyebrow">Programme du salon</p>
-  <h1>Importer des animations</h1>
+  <h1>Importer des séances</h1>
   <p>Une ligne décrit une animation pour un jour. Indiquez plusieurs horaires séparés par des virgules si elle se répète dans la journée. Aucune donnée n'est enregistrée avant la confirmation de l'aperçu.</p>
 
   {% if issues %}
@@ -24,7 +24,8 @@
       <table>
         <thead>
           <tr>
-            <th scope="col">Ligne</th><th scope="col">Animation</th><th scope="col">Jour</th>
+            <th scope="col">Ligne</th><th scope="col">Animation</th>
+            <th scope="col">Catégorie</th><th scope="col">Thématiques</th><th scope="col">Jour</th>
             <th scope="col">Horaire</th><th scope="col">Durée</th><th scope="col">Lieu de RDV</th><th scope="col">Jauge</th>
             <th scope="col">Responsable</th>
           </tr>
@@ -32,7 +33,8 @@
         <tbody>
           {% for row in preview.rows %}
             <tr>
-              <td>{{ row.line }}</td><td>{{ row.animation_title }}</td><td>{{ row.date|date:"d/m/Y" }}</td>
+              <td>{{ row.line }}</td><td>{{ row.animation_title }}</td>
+              <td>{{ row.venue_category_label }}</td><td>{{ row.theme_names|join:", " }}</td><td>{{ row.date|date:"d/m/Y" }}</td>
               <td>{{ row.starts_at|time:"H:i" }}–{{ row.ends_at|time:"H:i" }}</td><td>{{ row.duration_minutes }} min</td>
               <td>{{ row.location }}</td><td>{{ row.max_capacity }}</td>
               <td>{{ row.organizer|default:"—" }}{% if row.organizer_email %}<br>{{ row.organizer_email }}{% endif %}</td>
@@ -54,6 +56,27 @@
       </form>
     </div>
   {% else %}
+    <section aria-labelledby="import-taxonomy-title">
+      <h2 id="import-taxonomy-title">Catégorie et thématiques à importer</h2>
+      <div class="cards import-reference-grid">
+        <article class="card import-reference-card">
+          <p class="card-kicker">Colonne obligatoire</p>
+          <h3 class="card-title"><code>categorie</code></h3>
+          <p><strong>Valeurs acceptées :</strong>
+            {% for value, label in venue_categories %}<code>{{ label }}</code>{% if not forloop.last %} ou {% endif %}{% endfor %}
+          </p>
+        </article>
+        <article class="card import-reference-card">
+          <p class="card-kicker">Au moins une valeur obligatoire</p>
+          <h3 class="card-title"><code>thematiques</code></h3>
+          <p><strong>Thématiques disponibles :</strong>
+            {% for theme in active_themes %}<code>{{ theme.name }}</code>{% if not forloop.last %}, {% endif %}{% empty %}Aucune thématique active — ajoutez-en dans les paramètres avant l’import.{% endfor %}
+          </p>
+          <p class="helptext">Pour plusieurs thématiques, utilisez <code>|</code>, par exemple <code>Sol|Biodiversité</code>.</p>
+        </article>
+      </div>
+    </section>
+
     <form method="post" enctype="multipart/form-data">
       {% csrf_token %}
       {{ form.as_p }}
@@ -66,12 +89,12 @@
         Télécharger le modèle CSV
       </a>
     </p>
-    <p><code>titre_animation;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable</code></p>
-    <p>Les six premières colonnes sont obligatoires. <code>responsable</code> et <code>email_responsable</code> sont facultatives mais nécessaires pour le publipostage final.</p>
+    <p><code>titre_animation;categorie;thematiques;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable</code></p>
+    <p>Les huit premières colonnes sont obligatoires. La catégorie vaut <code>Salle</code> ou <code>Extérieur</code>. Séparez plusieurs thématiques par une barre verticale (<code>|</code>). <code>responsable</code> et <code>email_responsable</code> sont facultatives mais nécessaires pour le publipostage final.</p>
     <h3>Exemple</h3>
-    <pre><code>titre_animation;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable
-La vie du sol;Pôle sols;45;30;mercredi;"09:00, 10:15, 14:00";Marie Martin;marie@example.org</code></pre>
-    <p>La durée accepte par exemple <code>45</code>, <code>45 min</code>, <code>1h</code> ou <code>1h30</code>. Une animation absente du catalogue sera créée automatiquement.</p>
+    <pre><code>titre_animation;categorie;thematiques;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable
+La vie du sol;Extérieur;Sol|Biodiversité;Pôle sols;45;30;mercredi;"09:00, 10:15, 14:00";Marie Martin;marie@example.org</code></pre>
+    <p>La durée accepte par exemple <code>45</code>, <code>45 min</code>, <code>1h</code> ou <code>1h30</code>. Une animation absente du catalogue sera créée automatiquement. Pour une animation existante de même titre et durée, la catégorie et les thématiques seront mises à jour lors de la confirmation.</p>
   {% endif %}
 
   <p><a href="{% url 'operations:dashboard' %}">Retour au tableau de bord</a></p>

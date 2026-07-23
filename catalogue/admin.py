@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.utils.translation import ngettext
 
-from .models import Animation, Category, SchoolLevel, Session
+from .models import Animation, SchoolLevel, Session, Theme
 from .services import validate_max_capacity
 
 
@@ -23,15 +23,6 @@ def _available_slug(animation):
     return candidate
 
 
-@admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "is_active")
-    list_editable = ("is_active",)
-    list_filter = ("is_active",)
-    search_fields = ("name",)
-    prepopulated_fields = {"slug": ("name",)}
-
-
 @admin.register(SchoolLevel)
 class SchoolLevelAdmin(admin.ModelAdmin):
     list_display = ("label", "code", "sort_order", "is_active")
@@ -39,6 +30,19 @@ class SchoolLevelAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     ordering = ("sort_order", "label")
     search_fields = ("label", "code")
+
+
+@admin.register(Theme)
+class ThemeAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "sort_order", "is_active")
+    list_editable = ("sort_order", "is_active")
+    list_filter = ("is_active",)
+    ordering = ("sort_order", "name")
+    search_fields = ("name", "slug")
+    prepopulated_fields = {"slug": ("name",)}
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class SessionInline(admin.TabularInline):
@@ -91,31 +95,38 @@ class SessionAdminForm(forms.ModelForm):
 @admin.register(Animation)
 class AnimationAdmin(admin.ModelAdmin):
     actions = ("duplicate_animations",)
-    autocomplete_fields = ("category",)
     date_hierarchy = "created_at"
-    filter_horizontal = ("recommended_levels",)
+    exclude = ("category",)
+    filter_horizontal = ("themes", "recommended_levels")
     inlines = (SessionInline,)
-    list_display = ("title", "category", "indicative_duration", "is_active", "updated_at")
+    list_display = (
+        "title",
+        "venue_category",
+        "indicative_duration",
+        "is_active",
+        "updated_at",
+    )
     list_editable = ("is_active",)
-    list_filter = ("is_active", "category", "recommended_levels")
-    list_select_related = ("category",)
+    list_filter = ("is_active", "venue_category", "themes", "recommended_levels")
     prepopulated_fields = {"slug": ("title",)}
-    search_fields = ("title", "short_description", "description")
+    search_fields = ("title", "short_description", "description", "themes__name")
 
     @admin.action(description="Dupliquer les animations sélectionnées")
     def duplicate_animations(self, request, queryset):
         duplicated = 0
         with transaction.atomic():
             for source in queryset.select_related("category").prefetch_related(
-                "recommended_levels"
+                "themes", "recommended_levels"
             ):
                 levels = list(source.recommended_levels.all())
+                themes = list(source.themes.all())
                 copy = Animation.objects.create(
                     title=f"Copie de {source.title}"[:200],
                     slug=_available_slug(source),
                     short_description=source.short_description,
                     description=source.description,
                     category=source.category,
+                    venue_category=source.venue_category,
                     indicative_duration=source.indicative_duration,
                     image=source.image.name if source.image else "",
                     instructions=source.instructions,
@@ -123,6 +134,7 @@ class AnimationAdmin(admin.ModelAdmin):
                     is_active=False,
                 )
                 copy.recommended_levels.set(levels)
+                copy.themes.set(themes)
                 self.log_addition(
                     request,
                     copy,
@@ -160,8 +172,8 @@ class SessionAdmin(admin.ModelAdmin):
         "status",
     )
     list_editable = ("status",)
-    list_filter = ("date", "status", "animation__category")
-    list_select_related = ("animation", "animation__category")
+    list_filter = ("date", "status", "animation__venue_category", "animation__themes")
+    list_select_related = ("animation",)
     ordering = ("date", "starts_at", "animation__title")
     search_fields = (
         "animation__title",

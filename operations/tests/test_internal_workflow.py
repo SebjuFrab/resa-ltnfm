@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from catalogue.models import Animation, Category, SchoolLevel, Session
+from catalogue.models import Animation, Category, SchoolLevel, Session, Theme
 from communication.models import EmailLog, MailingCampaign, MailingDelivery
 from inscriptions.models import (
     GroupFamily,
@@ -39,8 +39,11 @@ class InternalRegistrationWorkflowTests(TestCase):
             slug="decouvrir-sol-vivant",
             short_description="Une animation de terrain.",
             category=cls.category,
+            venue_category=Animation.VenueCategory.OUTDOOR,
             indicative_duration=60,
         )
+        cls.theme = Theme.objects.get(slug="sol")
+        cls.animation.themes.add(cls.theme)
         cls.session = Session.objects.create(
             animation=cls.animation,
             date=date(2026, 9, 23),
@@ -673,6 +676,157 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertEqual(EmailLog.objects.filter(kind="MODIFICATION").count(), 1)
         self.assertEqual(len(mail.outbox), 1)
 
+    def test_day_filter_previews_then_atomically_replaces_the_program(self):
+        registration = self.create_and_confirm_registration()
+        previous_reservation = registration.reservations.get(
+            status=Reservation.Status.ACTIVE
+        )
+        next_day_session = Session.objects.create(
+            animation=self.animation,
+            date=date(2026, 9, 24),
+            starts_at=time(14),
+            ends_at=time(15),
+            location="Salle du 24 septembre",
+            max_capacity=40,
+        )
+        planning_url = reverse(
+            "operations:registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+        mail.outbox.clear()
+
+        response = self.client.get(planning_url, {"date": "2026-09-24"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["planning_date"], date(2026, 9, 24))
+        self.assertContains(response, "Salle du 24 septembre")
+        self.assertNotContains(response, self.session.location)
+        self.assertContains(
+            response,
+            "Le jour du groupe et ses réservations ne seront remplacés qu’au moment",
+        )
+        self.assertEqual(
+            response.context["planning_post_url"],
+            f"{planning_url}?date=2026-09-24",
+        )
+        registration.refresh_from_db()
+        previous_reservation.refresh_from_db()
+        self.assertEqual(registration.visit_date, date(2026, 9, 23))
+        self.assertEqual(previous_reservation.status, Reservation.Status.ACTIVE)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{planning_url}?date=2026-09-24",
+                self.planning_payload(next_day_session, students=12, chaperones=1),
+            )
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "operations:registration-detail",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
+        registration.refresh_from_db()
+        previous_reservation.refresh_from_db()
+        active_reservation = registration.reservations.get(
+            status=Reservation.Status.ACTIVE
+        )
+        self.assertEqual(registration.visit_date, date(2026, 9, 24))
+        self.assertEqual(active_reservation.session, next_day_session)
+        self.assertEqual(
+            (active_reservation.student_count, active_reservation.chaperone_count),
+            (12, 1),
+        )
+        self.assertEqual(previous_reservation.status, Reservation.Status.CANCELLED)
+        self.assertEqual(EmailLog.objects.filter(kind="MODIFICATION").count(), 1)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_day_filter_requires_a_new_program_and_ignores_an_old_day_injection(self):
+        registration = self.create_and_confirm_registration()
+        previous_reservation = registration.reservations.get(
+            status=Reservation.Status.ACTIVE
+        )
+        next_day_session = Session.objects.create(
+            animation=self.animation,
+            date=date(2026, 9, 24),
+            starts_at=time(14),
+            ends_at=time(15),
+            location="Salle du lendemain",
+            max_capacity=40,
+        )
+        planning_url = reverse(
+            "operations:registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+        mail.outbox.clear()
+
+        response = self.client.post(
+            f"{planning_url}?date=2026-09-24",
+            self.planning_payload(self.session, students=10, chaperones=1),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Sélectionnez au moins une animation avant d&#x27;enregistrer les modifications.",
+        )
+        registration.refresh_from_db()
+        previous_reservation.refresh_from_db()
+        self.assertEqual(registration.visit_date, date(2026, 9, 23))
+        self.assertEqual(previous_reservation.status, Reservation.Status.ACTIVE)
+        self.assertFalse(
+            registration.reservations.filter(
+                session=next_day_session,
+                status=Reservation.Status.ACTIVE,
+            ).exists()
+        )
+        self.assertEqual(EmailLog.objects.filter(kind="MODIFICATION").count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_invalid_day_filter_cannot_change_the_group_or_its_program(self):
+        registration = self.create_and_confirm_registration()
+        previous_reservation = registration.reservations.get(
+            status=Reservation.Status.ACTIVE
+        )
+        next_day_session = Session.objects.create(
+            animation=self.animation,
+            date=date(2026, 9, 24),
+            starts_at=time(14),
+            ends_at=time(15),
+            location="Salle du lendemain",
+            max_capacity=40,
+        )
+        planning_url = reverse(
+            "operations:registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+        mail.outbox.clear()
+
+        response = self.client.post(
+            f"{planning_url}?date=2026-09-25",
+            self.planning_payload(next_day_session, students=10, chaperones=1),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Le jour ou l’un des filtres est invalide.",
+        )
+        registration.refresh_from_db()
+        previous_reservation.refresh_from_db()
+        self.assertEqual(registration.visit_date, date(2026, 9, 23))
+        self.assertEqual(previous_reservation.status, Reservation.Status.ACTIVE)
+        self.assertFalse(
+            registration.reservations.filter(
+                session=next_day_session,
+                status=Reservation.Status.ACTIVE,
+            ).exists()
+        )
+        self.assertEqual(EmailLog.objects.filter(kind="MODIFICATION").count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
     def test_day_change_notifies_only_after_the_new_program_is_selected(self):
         registration = self.create_and_confirm_registration()
         next_day_session = Session.objects.create(
@@ -723,15 +877,21 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertEqual(EmailLog.objects.filter(kind="MODIFICATION").count(), 0)
         self.assertEqual(len(mail.outbox), 0)
 
+        planning_url = reverse(
+            "operations:registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+        planning_page = self.client.get(f"{planning_url}?reschedule=1")
+        self.assertEqual(planning_page.context["planning_date"], date(2026, 9, 24))
+        self.assertEqual(
+            planning_page.context["planning_post_url"],
+            f"{planning_url}?reschedule=1&date=2026-09-24",
+        )
+        self.assertContains(planning_page, 'name="date"')
+
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
-                (
-                    reverse(
-                        "operations:registration-planning",
-                        kwargs={"reference": registration.reference},
-                    )
-                    + "?reschedule=1"
-                ),
+                f"{planning_url}?reschedule=1",
                 self.planning_payload(
                     next_day_session, students=18, chaperones=2
                 ),
@@ -826,25 +986,52 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertContains(response, "animation@example.test")
         self.assertEqual(len(response.context["sessions"]), 1)
 
-    def test_animation_filters_are_simplified_and_auto_submitted(self):
-        list_filter_form = AnimationFilterForm(include_taxonomy=False)
-        self.assertNotIn("category", list_filter_form.fields)
+    def test_animation_filters_include_category_and_theme_and_auto_submit(self):
+        list_filter_form = AnimationFilterForm()
+        self.assertIn("category", list_filter_form.fields)
+        self.assertIn("theme", list_filter_form.fields)
         self.assertNotIn("level", list_filter_form.fields)
-        self.assertIn("category", AnimationFilterForm().fields)
-        self.assertIn("level", AnimationFilterForm().fields)
+        Theme.objects.filter(slug="eau").update(is_active=False)
+        self.assertFalse(
+            list_filter_form.fields["theme"].queryset.filter(slug="eau").exists()
+        )
+
+        indoor_animation = Animation.objects.create(
+            title="Conférence climat",
+            slug="conference-climat",
+            short_description="Une conférence en salle.",
+            venue_category=Animation.VenueCategory.INDOOR,
+            indicative_duration=60,
+        )
+        indoor_animation.themes.add(Theme.objects.get(slug="climat"))
+        Session.objects.create(
+            animation=indoor_animation,
+            date=date(2026, 9, 23),
+            starts_at=time(14),
+            ends_at=time(15),
+            location="Salle A",
+            max_capacity=40,
+        )
 
         response = self.client.get(
             reverse("operations:animation-list"),
-            {"category": "999999", "level": "999999"},
+            {
+                "category": Animation.VenueCategory.OUTDOOR,
+                "theme": self.theme.pk,
+            },
         )
 
         self.assertContains(response, "data-auto-submit-filters")
         self.assertContains(response, "Les résultats se mettent à jour automatiquement")
-        self.assertContains(response, "js/auto-submit-filters.js")
+        self.assertContains(response, "auto-submit-filters")
         self.assertNotContains(response, "Appliquer les filtres")
-        self.assertNotContains(response, 'name="category"')
+        self.assertContains(response, 'name="category"')
+        self.assertContains(response, 'name="theme"')
         self.assertNotContains(response, 'name="level"')
         self.assertEqual(response.context["sessions"], [self.session])
+        self.assertContains(response, "Catégorie")
+        self.assertContains(response, "Thématiques")
+        self.assertNotContains(response, indoor_animation.title)
 
     def test_registration_planning_matches_animation_auto_filters(self):
         response = self.client.post(
@@ -857,16 +1044,27 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertContains(
             planning_response, "Les résultats se mettent à jour automatiquement"
         )
-        self.assertContains(planning_response, "js/auto-submit-filters.js")
+        self.assertContains(planning_response, "auto-submit-filters")
         self.assertContains(planning_response, "data-filter-draft")
         self.assertContains(planning_response, "data-unfiltered-action")
         self.assertContains(planning_response, "data-clear-filters")
         self.assertNotContains(planning_response, "Appliquer les filtres")
-        self.assertNotContains(planning_response, 'name="category"')
+        self.assertContains(planning_response, 'name="date"')
+        self.assertContains(planning_response, 'name="category"')
+        self.assertContains(planning_response, 'name="theme"')
         self.assertNotContains(planning_response, 'name="level"')
         self.assertEqual(
             set(planning_response.context["filter_form"].fields),
-            {"q", "starts_after", "ends_before", "status", "available_only"},
+            {
+                "q",
+                "date",
+                "category",
+                "theme",
+                "starts_after",
+                "ends_before",
+                "status",
+                "available_only",
+            },
         )
 
     def test_auto_filters_restore_scroll_focus_and_planning_draft(self):
@@ -877,6 +1075,8 @@ class InternalRegistrationWorkflowTests(TestCase):
         for expected_code in (
             "window.scrollY",
             "window.scrollTo(0, scrollTop)",
+            'window.history.scrollRestoration = "manual"',
+            'root.style.scrollBehavior = "auto"',
             "preventScroll: true",
             'document.querySelector("form[data-filter-draft]")',
             "const readStoredDraft",
@@ -884,6 +1084,18 @@ class InternalRegistrationWorkflowTests(TestCase):
         ):
             with self.subTest(expected_code=expected_code):
                 self.assertIn(expected_code, script)
+
+    def test_registration_planning_uses_three_compact_columns_on_desktop(self):
+        stylesheet = (settings.BASE_DIR / "static" / "css" / "app.css").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "grid-template-columns: repeat(3, minmax(0, 1fr));",
+            stylesheet,
+        )
+        self.assertIn("@media (max-width: 62rem)", stylesheet)
+        self.assertIn("@media (max-width: 44rem)", stylesheet)
 
     def test_final_mailing_sends_individual_teacher_and_organizer_messages(self):
         self.create_and_confirm_registration()

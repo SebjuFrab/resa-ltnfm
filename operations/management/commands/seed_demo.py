@@ -5,7 +5,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from catalogue.models import Animation, Category, SchoolLevel, Session
+from catalogue.models import Animation, SchoolLevel, Session, Theme
 from inscriptions.models import (
     GroupFamily,
     Institution,
@@ -22,13 +22,29 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        agriculture, _ = Category.objects.get_or_create(
-            slug="agriculture-durable",
-            defaults={"name": "Agriculture durable"},
-        )
-        biodiversity, _ = Category.objects.get_or_create(
+        biodiversity, _ = Theme.objects.update_or_create(
             slug="biodiversite",
-            defaults={"name": "Biodiversité"},
+            defaults={
+                "name": "Biodiversité",
+                "sort_order": 20,
+                "is_active": True,
+            },
+        )
+        soil_theme, _ = Theme.objects.update_or_create(
+            slug="sol",
+            defaults={"name": "Sol", "sort_order": 50, "is_active": True},
+        )
+        climate_theme, _ = Theme.objects.update_or_create(
+            slug="climat",
+            defaults={"name": "Climat", "sort_order": 10, "is_active": True},
+        )
+        conference, _ = Theme.objects.update_or_create(
+            slug="conference",
+            defaults={
+                "name": "Conférence",
+                "sort_order": 100,
+                "is_active": True,
+            },
         )
         second, _ = SchoolLevel.objects.get_or_create(
             code="LYC_2DE",
@@ -49,12 +65,15 @@ class Command(BaseCommand):
                 "title": "La vie secrète du sol",
                 "short_description": "Observer la biodiversité qui rend les sols fertiles.",
                 "description": "Atelier d'observation et d'échanges autour de la vie du sol.",
-                "category": biodiversity,
+                "venue_category": Animation.VenueCategory.OUTDOOR,
                 "indicative_duration": 45,
                 "instructions": "Prévoir des chaussures adaptées à une activité extérieure.",
                 "accessibility": "Accessible aux personnes à mobilité réduite.",
             },
         )
+        soil.venue_category = Animation.VenueCategory.OUTDOOR
+        soil.save(update_fields=("venue_category",))
+        soil.themes.set((biodiversity, soil_theme))
         soil.recommended_levels.add(second, first)
         climate, _ = Animation.objects.get_or_create(
             slug="agriculture-et-climat",
@@ -62,12 +81,15 @@ class Command(BaseCommand):
                 "title": "Agriculture et climat",
                 "short_description": "Comprendre les leviers agricoles face au climat.",
                 "description": "Conférence participative avec des professionnels du territoire.",
-                "category": agriculture,
+                "venue_category": Animation.VenueCategory.INDOOR,
                 "indicative_duration": 60,
                 "instructions": "Se présenter dix minutes avant le début.",
                 "accessibility": "Salle accessible.",
             },
         )
+        climate.venue_category = Animation.VenueCategory.INDOOR
+        climate.save(update_fields=("venue_category",))
+        climate.themes.set((climate_theme, conference))
         climate.recommended_levels.add(second, first)
 
         session_definitions = (

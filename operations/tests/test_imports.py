@@ -1,14 +1,15 @@
 import csv
 from io import StringIO
+from unittest.mock import patch
 
-from django.contrib.admin.models import ADDITION, LogEntry
+from django.contrib.admin.models import ADDITION, CHANGE, LogEntry
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from catalogue.models import Animation, Category, Session
+from catalogue.models import Animation, Category, Session, Theme
 from operations.imports import (
     SessionImportError,
     import_session_payload,
@@ -19,7 +20,8 @@ from operations.imports import (
 @override_settings(EVENT_DATES=("2026-09-23", "2026-09-24"))
 class SessionImportTests(TestCase):
     HEADER = (
-        "titre_animation;lieu_de_rendez_vous;duree;jauge;jour;horaires;"
+        "titre_animation;categorie;thematiques;lieu_de_rendez_vous;"
+        "duree;jauge;jour;horaires;"
         "responsable;email_responsable\n"
     )
 
@@ -31,8 +33,11 @@ class SessionImportTests(TestCase):
             slug="sol-vivant",
             short_description="Découvrir le sol.",
             category=cls.category,
+            venue_category=Animation.VenueCategory.INDOOR,
             indicative_duration=45,
         )
+        cls.theme = Theme.objects.get(slug="sol")
+        cls.animation.themes.add(cls.theme)
 
     def _upload(self, rows, *, header=None, encoding="utf-8", name="animations.csv"):
         content = (header or self.HEADER) + rows
@@ -45,7 +50,8 @@ class SessionImportTests(TestCase):
     def test_one_line_expands_times_then_confirmation_creates_everything(self):
         preview = preview_session_csv(
             self._upload(
-                "Le compost;Accueil du hall;1h;32;Mercredi;09:00, 10:30;"
+                "Le compost;Extérieur;Sol|Biodiversité;Accueil du hall;"
+                "1h;32;Mercredi;09:00, 10:30;"
                 "Alice Martin;alice@example.test\n"
             )
         )
@@ -66,7 +72,15 @@ class SessionImportTests(TestCase):
         self.assertEqual(len(created), 2)
         animation = Animation.objects.get(title="Le compost")
         self.assertEqual(animation.indicative_duration, 60)
-        self.assertEqual(animation.category.slug, "non-classee")
+        self.assertIsNone(animation.category)
+        self.assertEqual(
+            animation.venue_category,
+            Animation.VenueCategory.OUTDOOR,
+        )
+        self.assertEqual(
+            set(animation.themes.values_list("slug", flat=True)),
+            {"sol", "biodiversite"},
+        )
         sessions = list(Session.objects.filter(animation=animation).order_by("starts_at"))
         self.assertEqual([session.max_capacity for session in sessions], [32, 32])
         self.assertEqual([session.organizer for session in sessions], ["Alice Martin"] * 2)
@@ -79,7 +93,8 @@ class SessionImportTests(TestCase):
     def test_existing_animation_is_reused_without_creating_default_category(self):
         preview = preview_session_csv(
             self._upload(
-                "Le sol vivant;Pôle sols;45;30;jeudi;14:00;Équipe LTNM;\n"
+                "Le sol vivant;Salle;Sol;Pôle sols;45;30;jeudi;14:00;"
+                "Équipe LTNM;\n"
             )
         )
 
@@ -94,13 +109,13 @@ class SessionImportTests(TestCase):
 
     def test_human_headers_aliases_and_cp1252_are_accepted(self):
         header = (
-            "Titre animation;Lieu de RDV;Durée (min);Capacité;Date;Heure de début;"
-            "Organisateur;Courriel responsable\n"
+            "Titre animation;Catégorie;Thématique;Lieu de RDV;Durée (min);"
+            "Capacité;Date;Heure de début;Organisateur;Courriel responsable\n"
         )
         preview = preview_session_csv(
             self._upload(
-                "Le sol vivant;Pôle sols;45;30;24/09/2026;14h;Équipe LTNM;"
-                "contact@example.test\n",
+                "Le sol vivant;Salle;Sol;Pôle sols;45;30;24/09/2026;14h;"
+                "Équipe LTNM;contact@example.test\n",
                 header=header,
                 encoding="cp1252",
             )
@@ -114,7 +129,9 @@ class SessionImportTests(TestCase):
 
     def test_existing_animation_duration_mismatch_is_reported(self):
         preview = preview_session_csv(
-            self._upload("Le sol vivant;Pôle sols;60;30;mercredi;10:00;;\n")
+            self._upload(
+                "Le sol vivant;Salle;Sol;Pôle sols;60;30;mercredi;10:00;;\n"
+            )
         )
 
         self.assertFalse(preview.is_valid)
@@ -122,11 +139,144 @@ class SessionImportTests(TestCase):
         self.assertIn("45 minutes", preview.issues[0].message)
         self.assertEqual(Session.objects.count(), 0)
 
+    def test_category_and_themes_must_be_known(self):
+        invalid_category = preview_session_csv(
+            self._upload(
+                "Animation A;Chapiteau;Sol;Salle A;45;30;mercredi;10:00;;\n"
+            )
+        )
+        invalid_theme = preview_session_csv(
+            self._upload(
+                "Animation B;Salle;Thème inconnu;Salle B;"
+                "45;30;mercredi;11:00;;\n"
+            )
+        )
+        missing_theme = preview_session_csv(
+            self._upload(
+                "Animation C;Extérieur;;Pôle C;45;30;mercredi;12:00;;\n"
+            )
+        )
+
+        self.assertIn("Salle", invalid_category.issues[0].message)
+        self.assertIn("inconnue ou inactive", invalid_theme.issues[0].message)
+        self.assertIn("obligatoire", missing_theme.issues[0].message)
+
+    def test_duplicate_or_empty_theme_tokens_are_rejected(self):
+        duplicated = preview_session_csv(
+            self._upload(
+                "Animation A;Salle;Sol|sol;Salle A;45;30;mercredi;10:00;;\n"
+            )
+        )
+        empty = preview_session_csv(
+            self._upload(
+                "Animation B;Salle;Sol||Eau;Salle B;45;30;mercredi;11:00;;\n"
+            )
+        )
+
+        self.assertIn("dupliquée", duplicated.issues[0].message)
+        self.assertIn("valeur vide", empty.issues[0].message)
+
+    def test_same_animation_accepts_themes_in_a_different_order(self):
+        preview = preview_session_csv(
+            self._upload(
+                "Animation A;Extérieur;Sol|Biodiversité;Pôle A;"
+                "45;30;mercredi;10:00;;\n"
+                "Animation A;Extérieur;Biodiversité|Sol;Pôle A;"
+                "45;30;jeudi;10:00;;\n"
+            )
+        )
+
+        self.assertTrue(preview.is_valid, preview.issues)
+        self.assertEqual(len(preview.rows), 2)
+        self.assertEqual(
+            {row.theme_slugs for row in preview.rows},
+            {("biodiversite", "sol")},
+        )
+
+    def test_existing_animation_taxonomy_is_updated_on_confirmation(self):
+        preview = preview_session_csv(
+            self._upload(
+                "Le sol vivant;Extérieur;Sol|Biodiversité;Pôle sols;"
+                "45;30;mercredi;10:00;;\n"
+            )
+        )
+
+        self.assertTrue(preview.is_valid, preview.issues)
+        import_session_payload([row.as_payload() for row in preview.rows])
+        self.animation.refresh_from_db()
+
+        self.assertEqual(
+            self.animation.venue_category,
+            Animation.VenueCategory.OUTDOOR,
+        )
+        self.assertEqual(
+            set(self.animation.themes.values_list("slug", flat=True)),
+            {"sol", "biodiversite"},
+        )
+
+    def test_existing_animation_change_after_preview_is_rejected(self):
+        preview = preview_session_csv(
+            self._upload(
+                "Le sol vivant;Extérieur;Sol;Pôle sols;"
+                "45;30;mercredi;10:00;;\n"
+            )
+        )
+        self.assertTrue(preview.is_valid, preview.issues)
+        self.animation.themes.add(Theme.objects.get(slug="eau"))
+
+        with self.assertRaises(SessionImportError):
+            import_session_payload([row.as_payload() for row in preview.rows])
+
+        self.animation.refresh_from_db()
+        self.assertEqual(
+            self.animation.venue_category,
+            Animation.VenueCategory.INDOOR,
+        )
+        self.assertEqual(Session.objects.count(), 0)
+
+    def test_theme_change_after_preview_rolls_back_the_import(self):
+        preview = preview_session_csv(
+            self._upload(
+                "Nouvelle animation;Extérieur;Eau;Pôle eau;"
+                "45;30;mercredi;10:00;;\n"
+            )
+        )
+        self.assertTrue(preview.is_valid, preview.issues)
+        Theme.objects.filter(slug="eau").update(is_active=False)
+
+        with self.assertRaises(SessionImportError):
+            import_session_payload([row.as_payload() for row in preview.rows])
+
+        self.assertFalse(Animation.objects.filter(title="Nouvelle animation").exists())
+        self.assertEqual(Session.objects.count(), 0)
+
+    def test_animation_slug_race_is_reported_without_breaking_the_transaction(self):
+        preview = preview_session_csv(
+            self._upload(
+                "Nouvelle animation;Extérieur;Eau;Pôle eau;"
+                "45;30;mercredi;10:00;;\n"
+            )
+        )
+        self.assertTrue(preview.is_valid, preview.issues)
+
+        with (
+            patch(
+                "operations.imports._available_animation_slug",
+                return_value=self.animation.slug,
+            ),
+            patch.object(Animation, "full_clean", return_value=None),
+            self.assertRaises(SessionImportError),
+        ):
+            import_session_payload([row.as_payload() for row in preview.rows])
+
+        self.assertFalse(Animation.objects.filter(title="Nouvelle animation").exists())
+        self.assertEqual(Session.objects.count(), 0)
+
     def test_every_invalid_source_line_is_reported_and_nothing_is_written(self):
         preview = preview_session_csv(
             self._upload(
-                "Animation A;Salle A;0;30;mercredi;10:00;;\n"
-                "Animation B;Salle B;45;30;vendredi;11:00;;\n"
+                "Animation A;Salle;Sol;Salle A;0;30;mercredi;10:00;;\n"
+                "Animation B;Salle;Sol;Salle B;45;30;vendredi;11:00;;\n"
             )
         )
 
@@ -137,10 +287,14 @@ class SessionImportTests(TestCase):
 
     def test_duplicate_and_overlapping_times_are_rejected(self):
         duplicate = preview_session_csv(
-            self._upload("Animation A;Salle A;45;30;mercredi;10:00,10:00;;\n")
+            self._upload(
+                "Animation A;Salle;Sol;Salle A;45;30;mercredi;10:00,10:00;;\n"
+            )
         )
         overlapping = preview_session_csv(
-            self._upload("Animation A;Salle A;45;30;mercredi;10:00,10:30;;\n")
+            self._upload(
+                "Animation A;Salle;Sol;Salle A;45;30;mercredi;10:00,10:30;;\n"
+            )
         )
 
         self.assertFalse(duplicate.is_valid)
@@ -151,7 +305,8 @@ class SessionImportTests(TestCase):
     def test_invalid_responsible_email_is_rejected(self):
         preview = preview_session_csv(
             self._upload(
-                "Animation A;Salle A;45;30;mercredi;10:00;Alice;adresse-invalide\n"
+                "Animation A;Salle;Sol;Salle A;45;30;mercredi;10:00;"
+                "Alice;adresse-invalide\n"
             )
         )
 
@@ -160,12 +315,13 @@ class SessionImportTests(TestCase):
 
     def test_unquoted_times_in_comma_delimited_csv_are_not_silently_lost(self):
         header = (
-            "titre_animation,lieu_de_rendez_vous,duree,jauge,jour,horaires,"
+            "titre_animation,categorie,thematiques,lieu_de_rendez_vous,"
+            "duree,jauge,jour,horaires,"
             "responsable,email_responsable\n"
         )
         preview = preview_session_csv(
             self._upload(
-                "Le sol vivant,Pôle sols,45,30,mercredi,09:00,10:00,,\n",
+                "Le sol vivant,Salle,Sol,Pôle sols,45,30,mercredi,09:00,10:00,,\n",
                 header=header,
             )
         )
@@ -176,11 +332,12 @@ class SessionImportTests(TestCase):
 
     def test_optional_contact_columns_may_be_omitted_in_quoted_comma_csv(self):
         header = (
-            "titre_animation,lieu_de_rendez_vous,duree,jauge,jour,horaires\n"
+            "titre_animation,categorie,thematiques,lieu_de_rendez_vous,"
+            "duree,jauge,jour,horaires\n"
         )
         preview = preview_session_csv(
             self._upload(
-                'Le sol vivant,Pôle sols,45,30,mercredi,"09:00,10:00"\n',
+                'Le sol vivant,Salle,Sol,Pôle sols,45,30,mercredi,"09:00,10:00"\n',
                 header=header,
             )
         )
@@ -193,20 +350,22 @@ class SessionImportTests(TestCase):
     def test_same_new_animation_cannot_have_two_durations(self):
         preview = preview_session_csv(
             self._upload(
-                "Animation A;Salle A;45;30;mercredi;10:00;;\n"
-                "Animation A;Salle A;60;30;jeudi;10:00;;\n"
+                "Animation A;Salle;Sol;Salle A;45;30;mercredi;10:00;;\n"
+                "Animation A;Salle;Sol;Salle A;60;30;jeudi;10:00;;\n"
             )
         )
 
         self.assertFalse(preview.is_valid)
         self.assertEqual(len(preview.rows), 1)
-        self.assertIn("plusieurs durées", preview.issues[0].message)
+        self.assertIn("informations différentes", preview.issues[0].message)
 
     def test_confirmation_is_atomic_when_database_state_has_changed(self):
         preview = preview_session_csv(
             self._upload(
-                "Nouvelle animation;Salle neuve;45;30;mercredi;10:00;;\n"
-                "Le sol vivant;Pôle sols;45;30;mercredi;11:00;;\n"
+                "Nouvelle animation;Extérieur;Biodiversité;Salle neuve;"
+                "45;30;mercredi;10:00;;\n"
+                "Le sol vivant;Extérieur;Biodiversité;Pôle sols;"
+                "45;30;mercredi;11:00;;\n"
             )
         )
         self.assertTrue(preview.is_valid, preview.issues)
@@ -224,11 +383,21 @@ class SessionImportTests(TestCase):
 
         self.assertEqual(Session.objects.count(), 1)
         self.assertFalse(Animation.objects.filter(title="Nouvelle animation").exists())
-        self.assertFalse(Category.objects.filter(slug="non-classee").exists())
+        self.animation.refresh_from_db()
+        self.assertEqual(
+            self.animation.venue_category,
+            Animation.VenueCategory.INDOOR,
+        )
+        self.assertEqual(
+            set(self.animation.themes.values_list("slug", flat=True)),
+            {"sol"},
+        )
 
     def test_tampered_preview_duration_is_rejected(self):
         preview = preview_session_csv(
-            self._upload("Le sol vivant;Pôle sols;45;30;mercredi;10:00;;\n")
+            self._upload(
+                "Le sol vivant;Salle;Sol;Pôle sols;45;30;mercredi;10:00;;\n"
+            )
         )
         payload = preview.rows[0].as_payload()
         payload["duration_minutes"] = 60
@@ -245,7 +414,7 @@ class SessionImportTests(TestCase):
         staff.user_permissions.add(
             *Permission.objects.filter(
                 content_type__app_label="catalogue",
-                codename__in=("add_animation", "add_session"),
+                codename__in=("add_animation", "change_animation", "add_session"),
             )
         )
         self.client.force_login(staff)
@@ -254,13 +423,26 @@ class SessionImportTests(TestCase):
             reverse("operations:session-import"),
             {
                 "file": self._upload(
-                    "Le sol vivant;Pôle sols;45;30;jeudi;14:00;LTNM;\n"
+                    "Le sol vivant;Salle;Sol|Biodiversité;Pôle sols;45;30;jeudi;14:00;"
+                    "LTNM;\n"
                 )
             },
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Aperçu")
+        self.assertContains(
+            response,
+            '<th scope="col">Catégorie</th>',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<th scope="col">Thématiques</th>',
+            html=True,
+        )
+        self.assertContains(response, "Salle")
+        self.assertContains(response, "Biodiversité, Sol")
         self.assertEqual(Session.objects.count(), 0)
 
         response = self.client.post(
@@ -269,11 +451,25 @@ class SessionImportTests(TestCase):
         self.assertRedirects(response, reverse("operations:session-import"))
         self.assertEqual(Session.objects.count(), 1)
         session = Session.objects.get()
+        self.animation.refresh_from_db()
+        self.assertEqual(
+            set(self.animation.themes.values_list("slug", flat=True)),
+            {"sol", "biodiversite"},
+        )
         self.assertTrue(
             LogEntry.objects.filter(
                 user=staff,
                 action_flag=ADDITION,
                 object_id=str(session.pk),
+            ).exists()
+        )
+        self.assertTrue(
+            LogEntry.objects.filter(
+                user=staff,
+                action_flag=CHANGE,
+                content_type__app_label="catalogue",
+                content_type__model="animation",
+                object_id=str(self.animation.pk),
             ).exists()
         )
 
@@ -284,14 +480,26 @@ class SessionImportTests(TestCase):
         staff.user_permissions.add(
             *Permission.objects.filter(
                 content_type__app_label="catalogue",
-                codename__in=("add_animation", "add_session"),
+                codename__in=("add_animation", "change_animation", "add_session"),
             )
         )
         self.client.force_login(staff)
+        Theme.objects.filter(slug="eau").update(is_active=False)
 
         response = self.client.get(reverse("operations:session-import"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Importer des séances")
+        self.assertContains(response, "Catégorie et thématiques à importer")
+        self.assertContains(response, "<code>Salle</code>", html=True)
+        self.assertContains(response, "<code>Extérieur</code>", html=True)
+        self.assertContains(response, "<code>Sol</code>", html=True)
+        self.assertContains(response, "<code>Biodiversité</code>", html=True)
+        self.assertContains(response, "Fichier CSV des séances")
+        self.assertNotIn(
+            "eau",
+            set(response.context["active_themes"].values_list("slug", flat=True)),
+        )
         self.assertContains(response, reverse("operations:session-import-template"))
         self.assertContains(response, "Télécharger le modèle CSV")
 
@@ -302,7 +510,7 @@ class SessionImportTests(TestCase):
         staff.user_permissions.add(
             *Permission.objects.filter(
                 content_type__app_label="catalogue",
-                codename__in=("add_animation", "add_session"),
+                codename__in=("add_animation", "change_animation", "add_session"),
             )
         )
         self.client.force_login(staff)
@@ -326,6 +534,8 @@ class SessionImportTests(TestCase):
             rows[0],
             [
                 "titre_animation",
+                "categorie",
+                "thematiques",
                 "lieu_de_rendez_vous",
                 "duree",
                 "jauge",
@@ -355,9 +565,9 @@ class SessionImportTests(TestCase):
             username="partial-template-user", password="secret", is_staff=True
         )
         staff.user_permissions.add(
-            Permission.objects.get(
+            *Permission.objects.filter(
                 content_type__app_label="catalogue",
-                codename="add_animation",
+                codename__in=("add_animation", "add_session"),
             )
         )
         self.client.force_login(staff)

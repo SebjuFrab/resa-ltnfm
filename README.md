@@ -118,8 +118,8 @@ Pour qu’un responsable reçoive le publipostage, son courriel doit être rense
 
 L’administration `/admin/` permet, selon les permissions accordées, de gérer :
 
-- les catégories, niveaux scolaires et familles de groupe ;
-- les animations, leurs descriptions, niveaux conseillés, consignes, accessibilité et image ;
+- les thématiques, niveaux scolaires et familles de groupe ;
+- les animations, leur catégorie `Salle` ou `Extérieur`, leurs thématiques, descriptions, niveaux conseillés, consignes, accessibilité et image ;
 - les séances, horaires, lieux, jauges, responsables, courriels des responsables et statuts `OPEN`, `CLOSED` ou `CANCELLED` ;
 - les établissements et professeurs ;
 - la consultation des inscriptions, réservations et événements d’audit ;
@@ -127,6 +127,8 @@ L’administration `/admin/` permet, selon les permissions accordées, de gérer
 - les campagnes et livraisons de publipostage.
 
 Les modifications métier d’une inscription doivent passer par l’interface opérationnelle, qui applique les services transactionnels et les contrôles de capacité.
+
+Lors de la migration, les anciennes catégories thématiques sont recopiées dans les thématiques des animations. La catégorie `Salle` ou `Extérieur` n’est jamais déduite automatiquement : elle doit être renseignée sur chaque animation historique depuis l’administration ou par le nouvel import CSV.
 
 ## Import CSV des groupes
 
@@ -154,17 +156,17 @@ L’import en deux étapes se trouve sous `/operations/import/seances/`. La prem
 ### Colonnes canoniques
 
 ```csv
-titre_animation;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable
+titre_animation;categorie;thematiques;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable
 ```
 
-Les six premières colonnes sont obligatoires. `responsable` et `email_responsable` sont facultatives pour l’import, mais le courriel est nécessaire au publipostage destiné aux responsables.
+Les huit premières colonnes sont obligatoires. `categorie` vaut `Salle` ou `Extérieur`. `thematiques` contient une ou plusieurs thématiques actives séparées par `|`. `responsable` et `email_responsable` sont facultatives pour l’import, mais le courriel est nécessaire au publipostage destiné aux responsables.
 
 Exemple :
 
 ```csv
-titre_animation;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable
-Du blé au pain;Accueil Hall A;1h;30;mercredi;09:00,10:30,14:00;Marie Martin;marie@example.org
-Haies et biodiversité;Pôle bocage;45 min;25;24/09/2026;09h30,11h00;Jean Dupont;jean@example.org
+titre_animation;categorie;thematiques;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable
+Du blé au pain;Salle;Techniques végétales|Témoignage;Accueil Hall A;1h;30;mercredi;09:00,10:30,14:00;Marie Martin;marie@example.org
+Haies et biodiversité;Extérieur;Biodiversité|Jeu de piste;Pôle bocage;45 min;25;24/09/2026;09h30,11h00;Jean Dupont;jean@example.org
 ```
 
 Une ligne peut contenir plusieurs heures de début séparées par des virgules. Elle crée alors une séance par horaire, avec la même animation, la même durée, le même lieu, la même jauge et le même responsable. Dans un fichier dont le séparateur principal est la virgule, la cellule contenant plusieurs horaires doit être placée entre guillemets.
@@ -175,6 +177,8 @@ Une ligne peut contenir plusieurs heures de début séparées par des virgules. 
 - séparateur point-virgule ou virgule détecté depuis l’en-tête ;
 - 500 lignes source maximum et 2 000 séances générées maximum ;
 - noms de colonnes normalisés sans tenir compte des accents, espaces, tirets ou casse ;
+- `categorie` accepte `Salle` ou `Extérieur`, sans tenir compte des accents ni de la casse ;
+- `thematiques` exige au moins une thématique active existante ; plusieurs valeurs sont séparées par `|` ;
 - `duree` accepte un nombre de minutes, `45 min`, `1h`, `1h30` ou `01:30` ;
 - `jauge` doit être un entier strictement positif ;
 - `jour` accepte un jour du salon (`mercredi`, `jeudi`) ou une date autorisée au format `AAAA-MM-JJ` ou `JJ/MM/AAAA` ;
@@ -182,7 +186,8 @@ Une ligne peut contenir plusieurs heures de début séparées par des virgules. 
 - les horaires d’une même ligne ne peuvent pas se chevaucher compte tenu de la durée ;
 - `email_responsable`, lorsqu’il est fourni, doit être une adresse valide ;
 - les doublons sont refusés ;
-- une animation existante est réutilisée si son titre et sa durée correspondent ; sinon l’import crée l’animation dans la catégorie `Non classée` ;
+- une animation existante de même titre et durée est réutilisée ; sa catégorie et ses thématiques sont mises à jour atomiquement avec les séances ;
+- une animation absente est créée avec la catégorie et les thématiques du fichier ;
 - les séances créées sont ouvertes par défaut.
 
 Si une donnée devient invalide entre l’aperçu et la confirmation, aucune animation ni séance du fichier n’est créée.
@@ -217,8 +222,8 @@ Les capacités incluent les étudiants et les accompagnateurs, ainsi que les ret
 | `/operations/publipostage/<id>/` | staff + `communication.send_mailing` | détail d’une campagne |
 | `/operations/import/groupes/` | staff + droits complets du parcours interne | aperçu et import atomique des groupes |
 | `/operations/import/groupes/modele.csv` | staff + droits complets du parcours interne | modèle CSV des groupes |
-| `/operations/import/seances/` | staff + ajout animation et séance | import CSV en deux étapes |
-| `/operations/import/seances/modele.csv` | staff + ajout animation et séance | modèle CSV téléchargeable |
+| `/operations/import/seances/` | staff + ajout/modification animation et ajout séance | import CSV en deux étapes |
+| `/operations/import/seances/modele.csv` | staff + ajout/modification animation et ajout séance | modèle CSV téléchargeable |
 | `/operations/exports/telecharger/` | staff + permissions des données exportées | téléchargement d’un export choisi |
 | `/operations/exports/inscriptions.csv` | staff + lecture des données personnelles | export direct des inscriptions |
 | `/operations/exports/reservations.csv` | staff + permissions de lecture composées | export direct des réservations |
@@ -268,15 +273,16 @@ pyproject.toml                paquet Python et configuration des outils
 Principales relations :
 
 ```text
-Category ──< Animation >── SchoolLevel
-                 │
-                 └──< Session <── Reservation >── Registration
-                                                  ├── GroupFamily
-                                                  ├── Institution
-                                                  ├── Teacher
-                                                  ├── SchoolLevel
-                                                  ├── RegistrationEvent
-                                                  └── EmailLog
+Theme >──< Animation >──< SchoolLevel
+             │  └── catégorie Salle ou Extérieur
+             │
+             └──< Session <── Reservation >── Registration
+                                              ├── GroupFamily
+                                              ├── Institution
+                                              ├── Teacher
+                                              ├── SchoolLevel
+                                              ├── RegistrationEvent
+                                              └── EmailLog
 
 MailingCampaign ──< MailingDelivery
 ```
@@ -486,7 +492,7 @@ Vérifier que la séance possède une adresse `email_responsable` valide et qu�
 
 ### L’import est refusé
 
-Vérifier les six colonnes obligatoires, l’encodage, le séparateur, les jours autorisés, les formats de durée et d’heure, la jauge positive, les doublons et le courriel du responsable. La page d’aperçu affiche les erreurs avec leur numéro de ligne.
+Vérifier les huit colonnes obligatoires, la catégorie `Salle` ou `Extérieur`, les thématiques actives séparées par `|`, l’encodage, le séparateur, les jours autorisés, les formats de durée et d’heure, la jauge positive, les doublons et le courriel du responsable. La page d’aperçu affiche les erreurs avec leur numéro de ligne.
 
 ### Des places semblent occupées sans groupe confirmé
 

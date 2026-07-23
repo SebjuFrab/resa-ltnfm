@@ -36,7 +36,9 @@
         <dl class="compact-details">
           <dt>Lieu de RDV</dt><dd>{{ session.location }}</dd>
           <dt>Durée</dt><dd>{{ session.animation.indicative_duration }} min</dd>
-          <dt>Famille</dt><dd>{{ session.animation.category.name }}</dd>
+          <dt>Catégorie</dt><dd>{{ session.animation.get_venue_category_display|default:"À renseigner" }}</dd>
+          <dt>Thématiques</dt>
+          <dd>{% for theme in session.animation.themes.all %}{{ theme }}{% if not forloop.last %}, {% endif %}{% empty %}À renseigner{% endfor %}</dd>
           <dt>Responsable</dt><dd>{{ session.organizer|default:"Non renseigné" }}{% if session.organizer_email %}<br><a href="mailto:{{ session.organizer_email }}">{{ session.organizer_email }}</a>{% endif %}</dd>
         </dl>
         <p class="capacity"><strong>{{ session.remaining_capacity }}</strong> place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }} sur {{ session.max_capacity }}</p>

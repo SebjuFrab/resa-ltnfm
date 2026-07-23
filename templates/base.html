@@ -32,7 +32,7 @@
         {% if perms.catalogue.view_session %}<a href="{% url 'operations:animation-list' %}">Animations</a>{% endif %}
         {% if can_manage_registrations %}<a href="{% url 'operations:registration-create' %}">Nouveau groupe</a>{% endif %}
         {% if can_manage_registrations %}<a href="{% url 'operations:group-import' %}">Importer des groupes</a>{% endif %}
-        {% if perms.catalogue.add_animation and perms.catalogue.add_session %}<a href="{% url 'operations:session-import' %}">Importer des séances</a>{% endif %}
+        {% if perms.catalogue.add_animation and perms.catalogue.change_animation and perms.catalogue.add_session %}<a href="{% url 'operations:session-import' %}">Importer des séances</a>{% endif %}
         {% if perms.communication.send_mailing %}<a href="{% url 'operations:mailing-create' %}">Publipostage</a>{% endif %}
         <a href="{% url 'admin:index' %}">Paramètres</a>
         <span class="staff-account">{{ user.get_username }}</span>

@@ -11,15 +11,15 @@ from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.utils.text import slugify
 
-from catalogue.models import Animation, Category, Session
+from catalogue.models import Animation, Session, Theme
 
 MAX_ROWS = 500
 MAX_GENERATED_SESSIONS = 2_000
-DEFAULT_CATEGORY_SLUG = "non-classee"
-DEFAULT_CATEGORY_NAME = "Non classée"
 
 REQUIRED_COLUMNS = (
     "titre_animation",
+    "categorie",
+    "thematiques",
     "lieu_de_rendez_vous",
     "duree",
     "jauge",
@@ -33,6 +33,18 @@ COLUMN_ALIASES = {
         "titre",
         "animation",
         "nom_animation",
+    },
+    "categorie": {
+        "categorie",
+        "categorie_animation",
+        "type",
+        "type_animation",
+    },
+    "thematiques": {
+        "thematiques",
+        "thematique",
+        "themes",
+        "theme",
     },
     "lieu_de_rendez_vous": {
         "lieu_de_rendez_vous",
@@ -95,6 +107,25 @@ DAY_ALIASES = {
     "dim": "dimanche",
 }
 
+VENUE_CATEGORY_ALIASES = {
+    "salle": Animation.VenueCategory.INDOOR,
+    "interieur": Animation.VenueCategory.INDOOR,
+    "en_salle": Animation.VenueCategory.INDOOR,
+    "indoor": Animation.VenueCategory.INDOOR,
+    "exterieur": Animation.VenueCategory.OUTDOOR,
+    "dehors": Animation.VenueCategory.OUTDOOR,
+    "plein_air": Animation.VenueCategory.OUTDOOR,
+    "outdoor": Animation.VenueCategory.OUTDOOR,
+}
+
+THEME_ALIASES = {
+    "biodiv": "biodiversite",
+    "technique_vegetale": "techniques-vegetales",
+    "techniques_vegetale": "techniques-vegetales",
+    "technique_animale": "techniques-animales",
+    "techniques_animale": "techniques-animales",
+}
+
 
 @dataclass(frozen=True)
 class ImportIssue:
@@ -107,6 +138,13 @@ class SessionImportRow:
     line: int
     animation_id: int | None
     animation_title: str
+    venue_category: str
+    venue_category_label: str
+    theme_ids: tuple[int, ...]
+    theme_names: tuple[str, ...]
+    theme_slugs: tuple[str, ...]
+    original_venue_category: str | None
+    original_theme_ids: tuple[int, ...]
     duration_minutes: int
     date: date
     starts_at: time
@@ -122,6 +160,13 @@ class SessionImportRow:
             "line": self.line,
             "animation_id": self.animation_id,
             "animation_title": self.animation_title,
+            "venue_category": self.venue_category,
+            "venue_category_label": self.venue_category_label,
+            "theme_ids": list(self.theme_ids),
+            "theme_names": list(self.theme_names),
+            "theme_slugs": list(self.theme_slugs),
+            "original_venue_category": self.original_venue_category,
+            "original_theme_ids": list(self.original_theme_ids),
             "duration_minutes": self.duration_minutes,
             "date": self.date.isoformat(),
             "starts_at": self.starts_at.isoformat(timespec="minutes"),
@@ -156,6 +201,61 @@ def _normalize_header(value):
         character for character in normalized if not unicodedata.combining(character)
     )
     return re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
+
+
+def _parse_venue_category(value):
+    normalized = _normalize_header(value)
+    venue_category = VENUE_CATEGORY_ALIASES.get(normalized)
+    if venue_category is None:
+        raise ValueError("la catégorie doit être « Salle » ou « Extérieur »")
+    return venue_category, Animation.VenueCategory(venue_category).label
+
+
+def _active_theme_lookup():
+    lookup = {}
+    ambiguous_tokens = set()
+    for theme in Theme.objects.filter(is_active=True):
+        for raw_token in (theme.name, theme.slug):
+            token = _normalize_header(raw_token)
+            existing = lookup.get(token)
+            if existing is not None and existing.pk != theme.pk:
+                ambiguous_tokens.add(token)
+            else:
+                lookup[token] = theme
+    for token in ambiguous_tokens:
+        lookup.pop(token, None)
+    return lookup, ambiguous_tokens
+
+
+def _parse_themes(value, theme_lookup, ambiguous_theme_tokens):
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        raise ValueError("au moins une thématique est obligatoire")
+
+    raw_tokens = [part.strip() for part in raw_value.split("|")]
+    if any(not token for token in raw_tokens):
+        raise ValueError("la liste des thématiques contient une valeur vide")
+
+    themes = []
+    seen_ids = set()
+    for raw_token in raw_tokens:
+        token = _normalize_header(raw_token)
+        alias = THEME_ALIASES.get(token)
+        if alias is not None:
+            token = _normalize_header(alias)
+        if token in ambiguous_theme_tokens:
+            raise ValueError(f"la thématique « {raw_token} » est ambiguë")
+        theme = theme_lookup.get(token)
+        if theme is None:
+            raise ValueError(
+                f"la thématique « {raw_token} » est inconnue ou inactive"
+            )
+        if theme.pk in seen_ids:
+            raise ValueError(f"la thématique « {raw_token} » est dupliquée")
+        seen_ids.add(theme.pk)
+        themes.append(theme)
+
+    return tuple(sorted(themes, key=lambda theme: (theme.sort_order, theme.name, theme.pk)))
 
 
 def _parse_date(value):
@@ -283,15 +383,25 @@ def _validate_optional_contact(mapping):
 
 
 def _find_animation(title):
-    animations = list(Animation.objects.filter(title__iexact=title).distinct()[:2])
+    animations = list(
+        Animation.objects.filter(title__iexact=title)
+        .prefetch_related("themes")
+        .distinct()[:2]
+    )
     if len(animations) > 1:
         raise ValueError(f"animation ambiguë : {title}")
     return animations[0] if animations else None
 
 
-def _rows_from_mapping(mapping, line):
+def _rows_from_mapping(mapping, line, theme_lookup, ambiguous_theme_tokens):
     title = _validate_text(
         mapping["titre_animation"], label="le titre de l'animation", max_length=200
+    )
+    venue_category, venue_category_label = _parse_venue_category(mapping["categorie"])
+    themes = _parse_themes(
+        mapping["thematiques"],
+        theme_lookup,
+        ambiguous_theme_tokens,
     )
     location = _validate_text(
         mapping["lieu_de_rendez_vous"],
@@ -309,6 +419,11 @@ def _rows_from_mapping(mapping, line):
             f"la durée ne correspond pas aux {animation.indicative_duration} minutes "
             "de l'animation existante"
         )
+    original_theme_ids = (
+        tuple(sorted(theme.pk for theme in animation.themes.all()))
+        if animation
+        else ()
+    )
 
     raw_times = str(mapping["horaires"] or "").strip()
     if not raw_times:
@@ -332,6 +447,15 @@ def _rows_from_mapping(mapping, line):
                 line=line,
                 animation_id=animation.pk if animation else None,
                 animation_title=animation.title if animation else title,
+                venue_category=venue_category,
+                venue_category_label=venue_category_label,
+                theme_ids=tuple(theme.pk for theme in themes),
+                theme_names=tuple(theme.name for theme in themes),
+                theme_slugs=tuple(theme.slug for theme in themes),
+                original_venue_category=(
+                    animation.venue_category if animation else None
+                ),
+                original_theme_ids=original_theme_ids,
                 duration_minutes=duration_minutes,
                 date=session_date,
                 starts_at=starts_at,
@@ -432,12 +556,13 @@ def preview_session_csv(upload):
         content = _decode_csv(upload)
         reader = _csv_reader(content)
         header_mapping = _header_mapping(reader.fieldnames)
+        theme_lookup, ambiguous_theme_tokens = _active_theme_lookup()
     except (csv.Error, ValueError) as error:
         preview.issues.append(ImportIssue(None, str(error)))
         return preview
 
     seen_sessions = set()
-    durations_by_title = {}
+    animation_signatures = {}
     source_row_count = 0
     for index, raw_row in enumerate(reader, start=2):
         if None in raw_row:
@@ -464,14 +589,26 @@ def preview_session_csv(upload):
             break
 
         try:
-            import_rows = _rows_from_mapping(row, index)
-            title_key = import_rows[0].animation_title.strip().casefold()
-            previous_duration = durations_by_title.setdefault(
-                title_key, import_rows[0].duration_minutes
+            import_rows = _rows_from_mapping(
+                row,
+                index,
+                theme_lookup,
+                ambiguous_theme_tokens,
             )
-            if previous_duration != import_rows[0].duration_minutes:
+            title_key = import_rows[0].animation_title.strip().casefold()
+            animation_signature = (
+                import_rows[0].duration_minutes,
+                import_rows[0].venue_category,
+                frozenset(import_rows[0].theme_ids),
+            )
+            previous_signature = animation_signatures.setdefault(
+                title_key,
+                animation_signature,
+            )
+            if previous_signature != animation_signature:
                 raise ValueError(
-                    "une même animation possède plusieurs durées dans le fichier"
+                    "une même animation possède des informations différentes "
+                    "dans le fichier"
                 )
         except (KeyError, ValueError) as error:
             preview.issues.append(ImportIssue(index, str(error)))
@@ -517,6 +654,74 @@ def _payload_row(payload):
             label="le titre de l'animation",
             max_length=200,
         )
+        venue_category = _validate_text(
+            payload["venue_category"],
+            label="la catégorie",
+            max_length=7,
+        )
+        if venue_category not in Animation.VenueCategory.values:
+            raise ValueError("la catégorie n'est plus valide")
+        venue_category_label = _validate_text(
+            payload["venue_category_label"],
+            label="le libellé de la catégorie",
+            max_length=100,
+        )
+        if venue_category_label != Animation.VenueCategory(venue_category).label:
+            raise ValueError("le libellé de la catégorie n'est plus valide")
+
+        raw_theme_ids = payload["theme_ids"]
+        raw_theme_names = payload["theme_names"]
+        raw_theme_slugs = payload["theme_slugs"]
+        if not all(
+            isinstance(values, (list, tuple))
+            for values in (raw_theme_ids, raw_theme_names, raw_theme_slugs)
+        ):
+            raise ValueError("les thématiques de l'aperçu ne sont plus valides")
+        if not raw_theme_ids or not (
+            len(raw_theme_ids) == len(raw_theme_names) == len(raw_theme_slugs)
+        ):
+            raise ValueError("les thématiques de l'aperçu ne sont plus valides")
+        theme_ids = tuple(
+            _parse_positive_integer(value, "l'identifiant de thématique")
+            for value in raw_theme_ids
+        )
+        theme_names = tuple(
+            _validate_text(value, label="la thématique", max_length=100)
+            for value in raw_theme_names
+        )
+        theme_slugs = tuple(
+            _validate_text(value, label="la thématique", max_length=50)
+            for value in raw_theme_slugs
+        )
+        if (
+            len(set(theme_ids)) != len(theme_ids)
+            or len(set(theme_slugs)) != len(theme_slugs)
+        ):
+            raise ValueError("une thématique est dupliquée dans l'aperçu")
+
+        original_venue_category = payload["original_venue_category"]
+        if original_venue_category is not None:
+            original_venue_category = _validate_text(
+                original_venue_category,
+                label="la catégorie d'origine",
+                max_length=7,
+            )
+            if original_venue_category not in Animation.VenueCategory.values:
+                raise ValueError("la catégorie d'origine n'est plus valide")
+        raw_original_theme_ids = payload["original_theme_ids"]
+        if not isinstance(raw_original_theme_ids, (list, tuple)):
+            raise ValueError("les thématiques d'origine ne sont plus valides")
+        original_theme_ids = tuple(
+            _parse_positive_integer(value, "l'identifiant de thématique d'origine")
+            for value in raw_original_theme_ids
+        )
+        if len(set(original_theme_ids)) != len(original_theme_ids):
+            raise ValueError("une thématique d'origine est dupliquée dans l'aperçu")
+        if animation_id is None and (
+            original_venue_category is not None or original_theme_ids
+        ):
+            raise ValueError("les données d'origine de l'animation sont incohérentes")
+
         duration_minutes = _parse_positive_integer(
             payload["duration_minutes"], "la durée"
         )
@@ -553,6 +758,13 @@ def _payload_row(payload):
         line=line,
         animation_id=animation_id,
         animation_title=animation_title,
+        venue_category=venue_category,
+        venue_category_label=venue_category_label,
+        theme_ids=theme_ids,
+        theme_names=theme_names,
+        theme_slugs=theme_slugs,
+        original_venue_category=original_venue_category,
+        original_theme_ids=original_theme_ids,
         duration_minutes=duration_minutes,
         date=session_date,
         starts_at=starts_at,
@@ -576,21 +788,80 @@ def _available_animation_slug(title):
     return candidate
 
 
-def _default_category():
-    category = Category.objects.select_for_update().filter(slug=DEFAULT_CATEGORY_SLUG).first()
-    if category:
-        return category
-    category = (
-        Category.objects.select_for_update()
-        .filter(name__iexact=DEFAULT_CATEGORY_NAME)
-        .first()
+def _animation_signature(import_row):
+    return (
+        import_row.animation_id,
+        import_row.duration_minutes,
+        import_row.venue_category,
+        import_row.venue_category_label,
+        import_row.original_venue_category,
+        frozenset(import_row.original_theme_ids),
+        frozenset(
+            zip(
+                import_row.theme_ids,
+                import_row.theme_names,
+                import_row.theme_slugs,
+                strict=True,
+            )
+        ),
     )
-    if category:
-        return category
-    return Category.objects.create(name=DEFAULT_CATEGORY_NAME, slug=DEFAULT_CATEGORY_SLUG)
+
+
+def _locked_import_themes(import_rows, issues):
+    expected_ids = {
+        theme_id for import_row in import_rows for theme_id in import_row.theme_ids
+    }
+    themes_by_id = {
+        theme.pk: theme
+        for theme in Theme.objects.select_for_update().filter(pk__in=expected_ids)
+    }
+    for import_row in import_rows:
+        for theme_id, theme_name, theme_slug in zip(
+            import_row.theme_ids,
+            import_row.theme_names,
+            import_row.theme_slugs,
+            strict=True,
+        ):
+            theme = themes_by_id.get(theme_id)
+            if (
+                theme is None
+                or not theme.is_active
+                or theme.name != theme_name
+                or theme.slug != theme_slug
+            ):
+                issues.append(
+                    ImportIssue(
+                        import_row.line,
+                        "une thématique a été modifiée depuis la prévisualisation",
+                    )
+                )
+                break
+    return themes_by_id
+
+
+def _animation_unchanged_since_preview(animation, reference):
+    return (
+        animation.title.strip().casefold()
+        == reference.animation_title.strip().casefold()
+        and animation.indicative_duration == reference.duration_minutes
+        and animation.venue_category == reference.original_venue_category
+        and {theme.pk for theme in animation.themes.all()}
+        == set(reference.original_theme_ids)
+    )
+
+
+def _animation_matches_import(animation, reference):
+    return (
+        animation.title.strip().casefold()
+        == reference.animation_title.strip().casefold()
+        and animation.indicative_duration == reference.duration_minutes
+        and animation.venue_category == reference.venue_category
+        and {theme.pk for theme in animation.themes.all()} == set(reference.theme_ids)
+    )
 
 
 def _resolve_animations(import_rows, issues):
+    themes_by_id = _locked_import_themes(import_rows, issues)
     rows_by_title = {}
     for import_row in import_rows:
         rows_by_title.setdefault(import_row.animation_title.strip().casefold(), []).append(
@@ -601,9 +872,8 @@ def _resolve_animations(import_rows, issues):
     missing = []
     for title_key, title_rows in rows_by_title.items():
         reference = title_rows[0]
-        durations = {row.duration_minutes for row in title_rows}
-        animation_ids = {row.animation_id for row in title_rows}
-        if len(durations) != 1 or len(animation_ids) != 1:
+        signatures = {_animation_signature(row) for row in title_rows}
+        if len(signatures) != 1:
             issues.append(
                 ImportIssue(reference.line, "les données de l'animation sont incohérentes")
             )
@@ -612,12 +882,14 @@ def _resolve_animations(import_rows, issues):
         expected_id = reference.animation_id
         if expected_id is not None:
             animation = (
-                Animation.objects.select_for_update().filter(pk=expected_id).first()
+                Animation.objects.select_for_update()
+                .prefetch_related("themes")
+                .filter(pk=expected_id)
+                .first()
             )
-            if (
-                animation is None
-                or animation.title.strip().casefold() != title_key
-                or animation.indicative_duration != reference.duration_minutes
+            if animation is None or not _animation_unchanged_since_preview(
+                animation,
+                reference,
             ):
                 issues.append(
                     ImportIssue(
@@ -626,13 +898,27 @@ def _resolve_animations(import_rows, issues):
                     )
                 )
                 continue
+            animation.venue_category = reference.venue_category
+            try:
+                animation.full_clean()
+                with transaction.atomic():
+                    animation.save(update_fields=("venue_category", "updated_at"))
+                    animation.themes.set(
+                        [
+                            themes_by_id[theme_id]
+                            for theme_id in reference.theme_ids
+                        ]
+                    )
+            except (IntegrityError, ValidationError) as error:
+                issues.append(ImportIssue(reference.line, str(error)))
+                continue
             resolved[title_key] = animation
             continue
 
         matches = list(
-            Animation.objects.select_for_update().filter(
-                title__iexact=reference.animation_title
-            )[:2]
+            Animation.objects.select_for_update()
+            .prefetch_related("themes")
+            .filter(title__iexact=reference.animation_title)[:2]
         )
         if len(matches) > 1:
             issues.append(
@@ -640,11 +926,12 @@ def _resolve_animations(import_rows, issues):
             )
         elif matches:
             animation = matches[0]
-            if animation.indicative_duration != reference.duration_minutes:
+            if not _animation_matches_import(animation, reference):
                 issues.append(
                     ImportIssue(
                         reference.line,
-                        "une animation du même titre existe maintenant avec une autre durée",
+                        "une animation du même titre existe maintenant avec "
+                        "d'autres informations",
                     )
                 )
             else:
@@ -655,18 +942,21 @@ def _resolve_animations(import_rows, issues):
     if issues:
         return resolved
 
-    category = _default_category() if missing else None
     for title_key, reference in missing:
         animation = Animation(
             title=reference.animation_title,
             slug=_available_animation_slug(reference.animation_title),
             short_description=reference.animation_title,
-            category=category,
+            venue_category=reference.venue_category,
             indicative_duration=reference.duration_minutes,
         )
         try:
             animation.full_clean()
-            animation.save()
+            with transaction.atomic():
+                animation.save()
+                animation.themes.set(
+                    [themes_by_id[theme_id] for theme_id in reference.theme_ids]
+                )
         except (IntegrityError, ValidationError) as error:
             issues.append(ImportIssue(reference.line, str(error)))
         else:

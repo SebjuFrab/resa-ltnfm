@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
 
 from catalogue.admin import AnimationAdmin, SessionAdmin, SessionAdminForm
-from catalogue.models import Animation, Category, SchoolLevel, Session
+from catalogue.models import Animation, Category, SchoolLevel, Session, Theme
 from inscriptions.models import Institution, Registration, Reservation, Teacher
 
 
@@ -15,17 +15,20 @@ class CatalogueAdminTests(TestCase):
     def setUpTestData(cls):
         cls.category = Category.objects.create(name="Agriculture", slug="agriculture")
         cls.level = SchoolLevel.objects.create(code="LYC", label="Lycée", sort_order=50)
+        cls.theme = Theme.objects.get(slug="techniques-vegetales")
         cls.animation = Animation.objects.create(
             title="Cultiver demain",
             slug="cultiver-demain",
             short_description="Découvrir des pratiques agricoles durables.",
             description="Description complète",
             category=cls.category,
+            venue_category=Animation.VenueCategory.OUTDOOR,
             indicative_duration=60,
             instructions="Prévoir des chaussures fermées.",
             accessibility="Accessible aux personnes à mobilité réduite.",
         )
         cls.animation.recommended_levels.add(cls.level)
+        cls.animation.themes.add(cls.theme)
 
     def setUp(self):
         self.request = RequestFactory().post("/admin/")
@@ -49,8 +52,13 @@ class CatalogueAdminTests(TestCase):
         self.assertEqual(copy.title, "Copie de Cultiver demain")
         self.assertEqual(copy.slug, "cultiver-demain-copie")
         self.assertEqual(copy.category, self.category)
+        self.assertEqual(
+            copy.venue_category,
+            Animation.VenueCategory.OUTDOOR,
+        )
         self.assertEqual(copy.indicative_duration, 60)
         self.assertEqual(list(copy.recommended_levels.all()), [self.level])
+        self.assertEqual(list(copy.themes.all()), [self.theme])
         self.assertFalse(copy.is_active)
 
     def test_duplicate_animation_generates_a_unique_slug(self):
@@ -67,6 +75,29 @@ class CatalogueAdminTests(TestCase):
             set(Animation.objects.exclude(pk=self.animation.pk).values_list("slug", flat=True)),
             {"cultiver-demain-copie", "cultiver-demain-copie-2"},
         )
+
+    def test_animation_admin_requires_category_and_at_least_one_theme(self):
+        model_admin = AnimationAdmin(Animation, self.site)
+        form_class = model_admin.get_form(self.request)
+        form = form_class(
+            data={
+                "title": "Animation incomplète",
+                "slug": "animation-incomplete",
+                "short_description": "Description",
+                "description": "",
+                "venue_category": "",
+                "themes": [],
+                "recommended_levels": [],
+                "indicative_duration": 45,
+                "instructions": "",
+                "accessibility": "",
+                "is_active": "on",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("venue_category", form.errors)
+        self.assertIn("themes", form.errors)
 
     def test_session_actions_change_status(self):
         session = Session.objects.create(

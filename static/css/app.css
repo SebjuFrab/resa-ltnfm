@@ -928,7 +928,9 @@ button.button-quiet:hover {
 }
 
 .planning-session-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;
+  gap: .8rem;
 }
 
 .planning-session-card {
@@ -996,6 +998,25 @@ button.button-quiet:hover {
   min-height: 2.15rem;
   padding: .38rem .58rem;
   font-size: .62rem;
+}
+
+.import-reference-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-block: .8rem 1.25rem;
+}
+
+.import-reference-card {
+  padding: 1rem;
+}
+
+.import-reference-card:nth-child(2) {
+  border-top-color: var(--brand-green);
+}
+
+@media (max-width: 62rem) {
+  .planning-session-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .timeline {
@@ -1093,6 +1114,14 @@ button.button-quiet:hover {
 
   .form-grid-2,
   .form-grid-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .planning-session-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .import-reference-grid {
     grid-template-columns: 1fr;
   }
 }

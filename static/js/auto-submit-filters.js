@@ -6,6 +6,10 @@
   const draftMaxAge = 30 * 60 * 1000;
   const planningForm = document.querySelector("form[data-filter-draft]");
 
+  if ("scrollRestoration" in window.history) {
+    window.history.scrollRestoration = "manual";
+  }
+
   const clearFilterDraft = () => {
     try {
       window.sessionStorage.removeItem(draftStorageKey);
@@ -61,8 +65,17 @@
   }
 
   if (scrollTop !== null) {
+    const root = document.documentElement;
+    const previousScrollBehavior = root.style.scrollBehavior;
+    const restoreScroll = () => window.scrollTo(0, scrollTop);
+
+    root.style.scrollBehavior = "auto";
+    restoreScroll();
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => window.scrollTo(0, scrollTop));
+      restoreScroll();
+      window.requestAnimationFrame(() => {
+        root.style.scrollBehavior = previousScrollBehavior;
+      });
     });
   }
 

@@ -6,7 +6,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from catalogue.models import Category, SchoolLevel, Session
+from catalogue.models import Animation, SchoolLevel, Session, Theme
 from inscriptions.choices import department_form_choices
 from inscriptions.codes import generate_unique_group_code, normalize_group_code
 from inscriptions.models import GroupFamily, Institution, Registration, Reservation
@@ -14,10 +14,10 @@ from inscriptions.models import GroupFamily, Institution, Registration, Reservat
 
 class SessionImportForm(forms.Form):
     file = forms.FileField(
-        label="Fichier CSV des animations",
+        label="Fichier CSV des séances",
         help_text=(
             "UTF-8 ou Windows-1252, séparateur point-virgule conseillé, "
-            "500 lignes et 2 Mo maximum."
+            "thématiques séparées par |, 500 lignes et 2 Mo maximum."
         ),
         widget=forms.ClearableFileInput(attrs={"accept": ".csv,text/csv"}),
     )
@@ -106,11 +106,11 @@ class AnimationFilterForm(forms.Form):
         widget=forms.TextInput(attrs={"placeholder": "Titre, lieu ou responsable"}),
     )
     date = forms.ChoiceField(label="Jour", required=False)
-    category = forms.ModelChoiceField(
-        label="Catégorie", queryset=Category.objects.none(), required=False
-    )
-    level = forms.ModelChoiceField(
-        label="Niveau", queryset=SchoolLevel.objects.none(), required=False
+    category = forms.ChoiceField(label="Catégorie", required=False)
+    theme = forms.ModelChoiceField(
+        label="Thématique",
+        queryset=Theme.objects.none(),
+        required=False,
     )
     starts_after = forms.TimeField(
         label="À partir de",
@@ -127,31 +127,61 @@ class AnimationFilterForm(forms.Form):
         label="Places disponibles uniquement", required=False
     )
 
-    def __init__(self, *args, fixed_date=None, include_taxonomy=True, **kwargs):
+    def __init__(self, *args, default_date=None, **kwargs):
+        if isinstance(default_date, str):
+            default_date = date.fromisoformat(default_date)
+        default_date_value = default_date.isoformat() if default_date else None
+        bound_data = args[0] if args else kwargs.get("data")
+        if (
+            default_date_value
+            and bound_data is not None
+            and "date" not in bound_data
+        ):
+            bound_data = bound_data.copy()
+            bound_data["date"] = default_date_value
+            if args:
+                args = (bound_data, *args[1:])
+            else:
+                kwargs["data"] = bound_data
         super().__init__(*args, **kwargs)
-        self.fixed_date = fixed_date
-        self.include_taxonomy = include_taxonomy
-        self.fields["date"].choices = [("", "Tous les jours")] + [
+        self.default_date = default_date
+        event_date_choices = [
             (value, date.fromisoformat(value).strftime("%d/%m/%Y"))
             for value in settings.EVENT_DATES
         ]
-        if fixed_date:
-            self.fields.pop("date")
-        if include_taxonomy:
-            self.fields["category"].queryset = Category.objects.filter(is_active=True)
-            self.fields["level"].queryset = SchoolLevel.objects.filter(is_active=True)
+        if default_date:
+            self.fields["date"].required = True
+            self.fields["date"].choices = event_date_choices
+            self.initial["date"] = default_date_value
         else:
-            self.fields.pop("category")
-            self.fields.pop("level")
+            self.fields["date"].choices = [
+                ("", "Tous les jours"),
+                *event_date_choices,
+            ]
+        self.fields["category"].choices = [
+            ("", "Toutes"),
+            *Animation.VenueCategory.choices,
+        ]
+        self.fields["theme"].queryset = Theme.objects.filter(is_active=True)
         self.fields["status"].choices = [("", "Tous")] + list(Session.Status.choices)
+
+    @property
+    def selected_date(self):
+        if self.is_bound:
+            selected_date = self.data.get(self.add_prefix("date"))
+            valid_values = {value for value, _label in self.fields["date"].choices}
+            if selected_date in valid_values:
+                return date.fromisoformat(selected_date)
+        return self.default_date
 
     def apply(self, queryset):
         if not self.is_valid():
             return queryset
-        if self.fixed_date:
-            queryset = queryset.filter(date=self.fixed_date)
-        elif selected_date := self.cleaned_data.get("date"):
+        selected_date = self.cleaned_data.get("date")
+        if selected_date:
             queryset = queryset.filter(date=date.fromisoformat(selected_date))
+        elif self.default_date:
+            queryset = queryset.filter(date=self.default_date)
         if query := self.cleaned_data.get("q", "").strip():
             queryset = queryset.filter(
                 Q(animation__title__icontains=query)
@@ -161,9 +191,9 @@ class AnimationFilterForm(forms.Form):
                 | Q(organizer_email__icontains=query)
             )
         if category := self.cleaned_data.get("category"):
-            queryset = queryset.filter(animation__category=category)
-        if level := self.cleaned_data.get("level"):
-            queryset = queryset.filter(animation__recommended_levels=level)
+            queryset = queryset.filter(animation__venue_category=category)
+        if theme := self.cleaned_data.get("theme"):
+            queryset = queryset.filter(animation__themes=theme)
         if starts_after := self.cleaned_data.get("starts_after"):
             queryset = queryset.filter(starts_at__gte=starts_after)
         if ends_before := self.cleaned_data.get("ends_before"):
@@ -172,7 +202,7 @@ class AnimationFilterForm(forms.Form):
             queryset = queryset.filter(status=status)
         if self.cleaned_data.get("available_only"):
             queryset = queryset.filter(_remaining_capacity__gt=0)
-        return queryset.distinct() if self.include_taxonomy else queryset
+        return queryset.distinct()
 
 
 class StaffRegistrationForm(forms.Form):

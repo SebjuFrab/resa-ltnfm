@@ -19,6 +19,21 @@ class Category(models.Model):
         return self.name
 
 
+class Theme(models.Model):
+    name = models.CharField("nom", max_length=100, unique=True)
+    slug = models.SlugField("identifiant URL", unique=True)
+    sort_order = models.PositiveSmallIntegerField("ordre d’affichage", default=0)
+    is_active = models.BooleanField("active", default=True)
+
+    class Meta:
+        ordering = ("sort_order", "name", "pk")
+        verbose_name = "thématique"
+        verbose_name_plural = "thématiques"
+
+    def __str__(self):
+        return self.name
+
+
 class SchoolLevel(models.Model):
     code = models.CharField("code", max_length=30, unique=True)
     label = models.CharField("libellé", max_length=100)
@@ -35,6 +50,10 @@ class SchoolLevel(models.Model):
 
 
 class Animation(models.Model):
+    class VenueCategory(models.TextChoices):
+        INDOOR = "INDOOR", "Salle"
+        OUTDOOR = "OUTDOOR", "Extérieur"
+
     title = models.CharField("titre", max_length=200)
     slug = models.SlugField("identifiant URL", max_length=220, unique=True)
     short_description = models.CharField("description courte", max_length=300)
@@ -43,13 +62,26 @@ class Animation(models.Model):
         Category,
         on_delete=models.PROTECT,
         related_name="animations",
-        verbose_name="catégorie",
+        verbose_name="ancienne catégorie",
+        blank=True,
+        null=True,
+    )
+    venue_category = models.CharField(
+        "catégorie",
+        max_length=7,
+        choices=VenueCategory.choices,
+        null=True,
     )
     recommended_levels = models.ManyToManyField(
         SchoolLevel,
         related_name="animations",
         verbose_name="niveaux conseillés",
         blank=True,
+    )
+    themes = models.ManyToManyField(
+        Theme,
+        related_name="animations",
+        verbose_name="thématiques",
     )
     indicative_duration = models.PositiveSmallIntegerField(
         "durée indicative (minutes)",
@@ -70,6 +102,11 @@ class Animation(models.Model):
             models.CheckConstraint(
                 condition=Q(indicative_duration__gt=0),
                 name="cat_animation_duration_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(venue_category__in=("INDOOR", "OUTDOOR"))
+                | Q(venue_category__isnull=True),
+                name="cat_animation_venue_category_valid",
             ),
         )
 

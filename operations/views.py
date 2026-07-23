@@ -5,7 +5,7 @@ from copy import copy
 from uuid import UUID
 
 from django.contrib import messages
-from django.contrib.admin.models import ADDITION, LogEntry
+from django.contrib.admin.models import ADDITION, CHANGE, LogEntry
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied
@@ -20,7 +20,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_http_methods, require_POST
 
-from catalogue.models import SchoolLevel, Session
+from catalogue.models import Animation, SchoolLevel, Session, Theme
 from communication.mailing import (
     MAILING_TEMPLATE_VARIABLES,
     create_and_send_mailing,
@@ -90,6 +90,8 @@ RESERVATION_EXPORT_PERMISSIONS = (
 
 SESSION_IMPORT_COLUMNS = (
     "titre_animation",
+    "categorie",
+    "thematiques",
     "lieu_de_rendez_vous",
     "duree",
     "jauge",
@@ -227,7 +229,12 @@ def dashboard(request):
 
 @staff_member_required
 @permission_required(
-    ("catalogue.add_animation", "catalogue.add_session"), raise_exception=True
+    (
+        "catalogue.add_animation",
+        "catalogue.change_animation",
+        "catalogue.add_session",
+    ),
+    raise_exception=True,
 )
 def session_import(request):
     if request.method == "POST" and request.POST.get("action") == "cancel":
@@ -240,6 +247,11 @@ def session_import(request):
         if not payload:
             messages.error(request, "L'aperçu a expiré. Importez de nouveau le fichier.")
             return redirect("operations:session-import")
+        existing_animation_ids = {
+            row.get("animation_id")
+            for row in payload
+            if isinstance(row, dict) and row.get("animation_id") is not None
+        }
         try:
             sessions = import_session_payload(payload)
         except SessionImportError as error:
@@ -247,7 +259,14 @@ def session_import(request):
             return render(
                 request,
                 "operations/session_import.html",
-                {"form": SessionImportForm(), "issues": error.issues},
+                {
+                    "form": SessionImportForm(),
+                    "issues": error.issues,
+                    "venue_categories": Animation.VenueCategory.choices,
+                    "active_themes": Theme.objects.filter(is_active=True).order_by(
+                        "sort_order", "name"
+                    ),
+                },
                 status=400,
             )
         request.session.pop(IMPORT_SESSION_KEY, None)
@@ -257,9 +276,37 @@ def session_import(request):
             ADDITION,
             "Séance créée par import CSV validé.",
         )
+        animations = {session.animation_id: session.animation for session in sessions}
+        created_animations = [
+            animation
+            for animation_id, animation in animations.items()
+            if animation_id not in existing_animation_ids
+        ]
+        updated_animations = [
+            animation
+            for animation_id, animation in animations.items()
+            if animation_id in existing_animation_ids
+        ]
+        if created_animations:
+            LogEntry.objects.log_actions(
+                request.user.pk,
+                created_animations,
+                ADDITION,
+                "Animation créée par import CSV validé.",
+            )
+        if updated_animations:
+            LogEntry.objects.log_actions(
+                request.user.pk,
+                updated_animations,
+                CHANGE,
+                "Catégorie et thématiques vérifiées par import CSV validé.",
+            )
         messages.success(
             request,
-            f"{len(sessions)} créneau(x) importé(s). Les animations absentes ont été créées.",
+            (
+                f"{len(sessions)} créneau(x) importé(s). "
+                "Les animations ont été créées ou reclassées selon le fichier."
+            ),
         )
         return redirect("operations:session-import")
 
@@ -278,6 +325,10 @@ def session_import(request):
             "form": form,
             "preview": preview,
             "issues": preview.issues if preview else (),
+            "venue_categories": Animation.VenueCategory.choices,
+            "active_themes": Theme.objects.filter(is_active=True).order_by(
+                "sort_order", "name"
+            ),
         },
         status=400 if preview and preview.issues else 200,
     )
@@ -285,7 +336,12 @@ def session_import(request):
 
 @staff_member_required
 @permission_required(
-    ("catalogue.add_animation", "catalogue.add_session"), raise_exception=True
+    (
+        "catalogue.add_animation",
+        "catalogue.change_animation",
+        "catalogue.add_session",
+    ),
+    raise_exception=True,
 )
 def session_import_template(request):
     response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -299,6 +355,8 @@ def session_import_template(request):
     writer.writerow(
         (
             "La vie du sol",
+            "Extérieur",
+            "Sol|Biodiversité",
             "Pôle sols",
             "45 min",
             30,
@@ -310,8 +368,10 @@ def session_import_template(request):
     )
     writer.writerow(
         (
-            "Découverte des haies",
-            "Accueil du village",
+            "Agriculture et climat",
+            "Salle",
+            "Climat|Conférence",
+            "Salle A",
             "1h",
             25,
             "jeudi",
@@ -633,10 +693,11 @@ def _active_reservations(registration):
 def animation_list(request):
     sessions = (
         Session.objects.with_capacities(at=timezone.now())
-        .select_related("animation", "animation__category")
+        .select_related("animation")
+        .prefetch_related("animation__themes")
         .order_by("date", "starts_at", "animation__title")
     )
-    filter_form = AnimationFilterForm(request.GET or None, include_taxonomy=False)
+    filter_form = AnimationFilterForm(request.GET or None)
     sessions = list(filter_form.apply(sessions))
     return render(
         request,
@@ -691,12 +752,9 @@ def registration_create(request):
 
 
 def _planning_context(request, registration, *, pending_update=None):
-    planning_registration = registration
+    planning_registration = copy(registration)
     institution_name = registration.institution.name
-    pending_day_change = False
     if pending_update:
-        pending_day_change = pending_update["visit_date"] != registration.visit_date
-        planning_registration = copy(registration)
         planning_registration.group_code = pending_update["group_code"]
         planning_registration.student_count = pending_update["student_count"]
         planning_registration.chaperone_count = pending_update["chaperone_count"]
@@ -706,27 +764,29 @@ def _planning_context(request, registration, *, pending_update=None):
             if pending_update["existing_institution"]
             else pending_update["institution_name"]
         )
+    filter_form = AnimationFilterForm(
+        request.GET or None,
+        default_date=planning_registration.visit_date,
+    )
+    planning_date = filter_form.selected_date
+    planning_registration.visit_date = planning_date
+    pending_day_change = planning_date != registration.visit_date
     capacity_at = timezone.now()
     current_session_ids = set(
         registration.reservations.filter(
             status=Reservation.Status.ACTIVE,
-            session__date=planning_registration.visit_date,
+            session__date=planning_date,
         ).values_list("session_id", flat=True)
     )
     session_queryset = (
         Session.objects.with_capacities(at=capacity_at)
-        .filter(date=planning_registration.visit_date)
+        .filter(date=planning_date)
         .filter(Q(animation__is_active=True) | Q(pk__in=current_session_ids))
-        .select_related("animation", "animation__category")
-        .prefetch_related("animation__recommended_levels")
+        .select_related("animation")
+        .prefetch_related("animation__recommended_levels", "animation__themes")
         .order_by("starts_at", "ends_at", "animation__title")
     )
     all_sessions = list(session_queryset)
-    filter_form = AnimationFilterForm(
-        request.GET or None,
-        fixed_date=planning_registration.visit_date,
-        include_taxonomy=False,
-    )
     sessions = list(filter_form.apply(session_queryset))
     displayed_ids = {session.pk for session in sessions}
     unavailable_reservations = [
@@ -760,15 +820,20 @@ def _planning_context(request, registration, *, pending_update=None):
         "operations:registration-planning",
         kwargs={"reference": registration.reference},
     )
+    planning_post_query = f"date={planning_date.isoformat()}"
+    if pending_update:
+        planning_post_query = f"reschedule=1&{planning_post_query}"
     return sessions, planning_form, {
         "registration": planning_registration,
         "institution_name": institution_name,
         "is_rescheduling": bool(pending_update),
         "pending_day_change": pending_day_change,
+        "planning_date": planning_date,
         "filter_form": filter_form,
         "planning_form": planning_form,
         "session_rows": planning_form.session_rows(sessions),
         "action_url": action_url,
+        "planning_post_url": f"{action_url}?{planning_post_query}",
     }
 
 
@@ -836,7 +901,14 @@ def registration_planning(request, reference):
         registration,
         pending_update=pending_update,
     )
-    if request.method == "POST" and form.is_valid():
+    filter_form = context["filter_form"]
+    if request.method == "POST" and filter_form.is_bound and not filter_form.is_valid():
+        form.add_error(
+            None,
+            "Le jour ou l’un des filtres est invalide. Corrigez les filtres avant "
+            "d’enregistrer le planning.",
+        )
+    elif request.method == "POST" and form.is_valid():
         requested_counts = form.requested_counts()
         reservation_requests = _planning_requests(
             context["registration"],
@@ -868,7 +940,7 @@ def registration_planning(request, reference):
                         school_level=pending_update["school_level"],
                         student_count=pending_update["student_count"],
                         chaperone_count=pending_update["chaperone_count"],
-                        visit_date=pending_update["visit_date"],
+                        visit_date=context["planning_date"],
                         level_comment=pending_update["level_comment"],
                         comment=pending_update["comment"],
                         reservation_requests=reservation_requests,
@@ -882,6 +954,7 @@ def registration_planning(request, reference):
             elif registration.status == Registration.Status.DRAFT:
                 registration = save_draft(
                     registration,
+                    visit_date=context["planning_date"],
                     reservation_requests=reservation_requests,
                     actor_kind=RegistrationEvent.ActorKind.STAFF,
                     actor_user=request.user,
@@ -889,6 +962,7 @@ def registration_planning(request, reference):
             else:
                 registration = update_registration(
                     registration,
+                    visit_date=context["planning_date"],
                     reservation_requests=reservation_requests,
                     actor_kind=RegistrationEvent.ActorKind.STAFF,
                     actor_user=request.user,

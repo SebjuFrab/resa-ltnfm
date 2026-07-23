@@ -2,7 +2,7 @@ from datetime import date, time
 
 from django.utils import timezone
 
-from catalogue.models import Animation, Category, SchoolLevel, Session
+from catalogue.models import Animation, Category, SchoolLevel, Session, Theme
 from inscriptions.models import Institution, Registration, Reservation, Teacher
 
 
@@ -14,8 +14,10 @@ def create_operational_data(*, institution_name="Lycée des Champs"):
         slug="sol-vivant",
         short_description="Découvrir le sol.",
         category=category,
+        venue_category=Animation.VenueCategory.OUTDOOR,
         indicative_duration=45,
     )
+    animation.themes.add(Theme.objects.get(slug="sol"))
     session = Session.objects.create(
         animation=animation,
         date=date(2026, 9, 23),
@@ -63,4 +65,3 @@ def create_operational_data(*, institution_name="Lycée des Champs"):
         "registration": registration,
         "reservation": reservation,
     }
-

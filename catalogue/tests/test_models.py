@@ -5,7 +5,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils import timezone
 
-from catalogue.models import Animation, Category, SchoolLevel, Session
+from catalogue.models import Animation, Category, SchoolLevel, Session, Theme
 from inscriptions.models import Institution, Registration, Reservation, Teacher
 
 
@@ -19,9 +19,12 @@ class CatalogueModelTests(TestCase):
             slug="vie-du-sol",
             short_description="Observer et comprendre la vie du sol.",
             category=cls.category,
+            venue_category=Animation.VenueCategory.OUTDOOR,
             indicative_duration=45,
         )
         cls.animation.recommended_levels.add(cls.level)
+        cls.theme = Theme.objects.get(slug="sol")
+        cls.animation.themes.add(cls.theme)
 
     def make_session(self, **overrides):
         values = {
@@ -39,6 +42,7 @@ class CatalogueModelTests(TestCase):
         SchoolLevel.objects.create(code="C2", label="Cycle 2", sort_order=20)
 
         self.assertEqual(str(self.category), "Biodiversité")
+        self.assertEqual(str(self.theme), "Sol")
         self.assertEqual(str(self.level), "Cycle 3")
         self.assertEqual(
             list(
@@ -59,6 +63,21 @@ class CatalogueModelTests(TestCase):
 
         with self.assertRaises(ValidationError):
             self.animation.full_clean()
+
+    def test_animation_category_is_limited_to_indoor_or_outdoor(self):
+        self.animation.venue_category = "TENT"
+
+        with self.assertRaises(ValidationError):
+            self.animation.full_clean()
+
+    def test_animation_accepts_multiple_themes(self):
+        water = Theme.objects.get(slug="eau")
+        self.animation.themes.add(water)
+
+        self.assertEqual(
+            list(self.animation.themes.values_list("slug", flat=True)),
+            ["sol", "eau"],
+        )
 
     def test_session_end_must_be_after_start(self):
         session = self.make_session(ends_at=time(9))

@@ -170,6 +170,13 @@ sudo docker compose --env-file .env.production -f compose.production.yaml \
   exec web python manage.py createsuperuser
 ```
 
+Après l’application de `catalogue.0005_animation_taxonomy`, ouvrir les animations
+historiques dans l’administration et renseigner leur catégorie `Salle` ou `Extérieur`.
+La migration conserve leur ancienne catégorie comme thématique, mais ne déduit jamais
+automatiquement le type de lieu. La catégorie et les thématiques peuvent ensuite être
+reprises par le nouvel import CSV ou renseignées dans l’administration. Vérifier
+qu’aucune animation ne reste « À renseigner » avant l’ouverture des inscriptions.
+
 Ne pas exécuter `seed_demo` en production.
 
 ## 5. Reverse proxy et HTTPS

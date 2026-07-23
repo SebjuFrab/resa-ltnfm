@@ -12,6 +12,7 @@
     </div>
   </div>
   {% if is_rescheduling %}<p class="alert alert-warning">La fiche et le planning actuels restent inchangés jusqu’à l’enregistrement de cette étape. Vérifiez les effectifs attribués à chaque animation.</p>{% endif %}
+  {% if pending_day_change %}<p class="alert alert-warning">Vous préparez le programme du {{ planning_date|date:"d/m/Y" }}. Le jour du groupe et ses réservations ne seront remplacés qu’au moment de l’enregistrement.</p>{% endif %}
 
   <form method="get" class="filters" aria-label="Filtres des animations" data-auto-submit-filters>
     {% if is_rescheduling %}<input type="hidden" name="reschedule" value="1">{% endif %}
@@ -26,7 +27,7 @@
   </form>
 
   <p class="results-count"><strong>{{ session_rows|length }}</strong> créneau{% if session_rows|length > 1 %}x{% endif %} affiché{{ session_rows|length|pluralize }}.</p>
-  <form class="planning-form" method="post" action="{{ action_url }}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" data-filter-draft data-unfiltered-action="{{ action_url }}{% if is_rescheduling %}?reschedule=1{% endif %}" novalidate>
+  <form class="planning-form" method="post" action="{{ action_url }}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" data-filter-draft data-unfiltered-action="{{ planning_post_url }}" novalidate>
     {% csrf_token %}
     {{ planning_form.non_field_errors }}
     <div class="cards session-grid planning-session-grid" data-layout="compact-grid">
@@ -36,6 +37,7 @@
             <p class="card-kicker">{{ session.starts_at|time:"H:i" }}–{{ session.ends_at|time:"H:i" }} · {{ session.location }}</p>
             <h2 class="card-title">{{ session.animation.title }}</h2>
             <p class="planning-card-summary">{{ session.animation.short_description }}</p>
+            <p class="planning-card-levels"><strong>Catégorie :</strong> {{ session.animation.get_venue_category_display|default:"À renseigner" }} · <strong>Thématiques :</strong> {% for theme in session.animation.themes.all %}{{ theme }}{% if not forloop.last %}, {% endif %}{% empty %}À renseigner{% endfor %}</p>
             {% if session.animation.recommended_levels.exists %}<p class="planning-card-levels"><strong>Niveaux :</strong> {% for level in session.animation.recommended_levels.all %}{{ level }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
             <p id="capacity-{{ session.pk }}" class="capacity"><strong>{{ session.remaining_capacity }}</strong> place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }} sur {{ session.max_capacity }}</p>
             <div class="session-allocation" role="group" aria-labelledby="allocation-title-{{ session.pk }}">
