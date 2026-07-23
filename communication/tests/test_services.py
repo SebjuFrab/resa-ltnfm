@@ -48,6 +48,8 @@ class EmailServiceTests(TestCase):
             ends_at=time(10, 45),
             location="Pôle sols",
             max_capacity=30,
+            organizer="Alice Responsable",
+            organizer_email="alice.responsable@example.test",
         )
         institution = Institution.objects.create(
             name="Lycée des Champs",
@@ -111,7 +113,24 @@ class EmailServiceTests(TestCase):
         self.registration.refresh_from_db()
         self.assertIn(self.registration.group_code, message.body)
         self.assertIn("Effectif total : 26", message.body)
+        self.assertIn("Email de contact : marie@example.test", message.body)
+        self.assertIn("alice.responsable@example.test", message.body)
+        self.assertNotIn("Référence", message.body)
+        self.assertNotIn(str(self.registration.reference), message.body)
         self.assertNotIn("Consulter ou modifier", message.body)
+        html_body = message.alternatives[0].content
+        self.assertIn("cid:ltnfm-logo", html_body)
+        self.assertIn("#f3b709", html_body)
+        self.assertIn("#14ad88", html_body)
+        self.assertIn("Email de contact", html_body)
+        self.assertNotIn(str(self.registration.reference), html_body)
+        self.assertEqual(message.mixed_subtype, "related")
+        self.assertTrue(
+            any(
+                attachment.get_content_type() == "image/jpeg"
+                for attachment in message.attachments
+            )
+        )
 
     def test_modification_no_longer_requires_an_edit_link(self):
         send_modification_email(self.registration)

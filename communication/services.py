@@ -1,4 +1,5 @@
 import re
+from email.mime.image import MIMEImage
 from urllib.parse import urlsplit
 
 from django.conf import settings
@@ -25,6 +26,7 @@ TEMPLATE_NAMES = {
 }
 
 EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
+CONFIRMATION_LOGO_CID = "ltnfm-logo"
 
 
 def _safe_error_summary(error, recipient, edit_url=""):
@@ -64,6 +66,20 @@ def _record_delivery_event(email_log):
     )
 
 
+def _attach_confirmation_logo(message):
+    logo_path = settings.BASE_DIR / "static" / "images" / "logo-ltnfm-2020.jpg"
+    with logo_path.open("rb") as logo_file:
+        logo = MIMEImage(logo_file.read(), _subtype="jpeg")
+    logo.add_header("Content-ID", f"<{CONFIRMATION_LOGO_CID}>")
+    logo.add_header(
+        "Content-Disposition",
+        "inline",
+        filename="la-terre-est-notre-metier.jpg",
+    )
+    message.mixed_subtype = "related"
+    message.attach(logo)
+
+
 @sensitive_variables("edit_url")
 def send_registration_email(registration, kind, *, edit_url=""):
     """Send and log one registration email without propagating SMTP failures.
@@ -89,6 +105,7 @@ def send_registration_email(registration, kind, *, edit_url=""):
             or registration.group_name
         ),
         "total_count": registration.student_count + registration.chaperone_count,
+        "contact_email": recipient,
         "edit_url": edit_url,
         "organization_email": settings.ORGANIZATION_EMAIL,
         "organization_phone": settings.ORGANIZATION_PHONE,
@@ -106,6 +123,8 @@ def send_registration_email(registration, kind, *, edit_url=""):
             to=[recipient],
         )
         message.attach_alternative(html_body, "text/html")
+        if kind == EmailLog.Kind.CONFIRMATION:
+            _attach_confirmation_logo(message)
         sent_count = message.send(fail_silently=False)
         if sent_count != 1:
             raise RuntimeError("Le serveur de courriel n'a accepté aucun message.")
