@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Groupes et inscriptions — LTNM{% endblock %}
+
+{% block content %}
+  <div class="page-heading-row">
+    <div>
+      <p class="eyebrow">Inscriptions scolaires</p>
+      <h1>Groupes</h1>
+      <p>Sélectionnez un groupe pour choisir ses animations, poursuivre son inscription ou consulter sa fiche.</p>
+    </div>
+    <div class="actions">
+      <a class="button" href="{% url 'operations:registration-create' %}">Nouveau groupe</a>
+      <a class="button button-secondary" href="{% url 'operations:group-import' %}">Importer des groupes</a>
+    </div>
+  </div>
+
+  {% if draft_count %}
+    <p class="alert alert-warning">
+      <strong>{{ draft_count }} groupe{{ draft_count|pluralize }} à programmer au total.</strong>
+      Filtrez sur « Brouillon » pour les retrouver, choisissez leurs animations puis confirmez leur inscription.
+    </p>
+  {% endif %}
+
+  <form method="get" class="filters" aria-label="Filtres des groupes" data-auto-submit-filters>
+    <fieldset>
+      <legend>Filtrer les groupes</legend>
+      <div class="form-grid form-grid-3">{{ filter_form.as_p }}</div>
+      <div class="actions">
+        <a class="button button-secondary" href="{% url 'operations:registration-list' %}" data-clear-filters>Effacer</a>
+        <noscript><button type="submit">Filtrer</button></noscript>
+      </div>
+      <p class="helptext">Les résultats se mettent à jour automatiquement.</p>
+    </fieldset>
+  </form>
+  <script src="{% static 'js/auto-submit-filters.js' %}" defer></script>
+
+  <p class="results-count">
+    <strong>{{ registration_page.paginator.count }}</strong>
+    groupe{{ registration_page.paginator.count|pluralize }} affiché{{ registration_page.paginator.count|pluralize }}.
+  </p>
+
+  <div class="table-wrap">
+    <table class="registration-list-table">
+      <thead>
+        <tr>
+          <th scope="col">Groupe</th>
+          <th scope="col">Établissement</th>
+          <th scope="col">Professeur</th>
+          <th scope="col">Jour et effectif</th>
+          <th scope="col">Animations</th>
+          <th scope="col">Statut</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for registration in registration_page %}
+          <tr>
+            <td>
+              <strong>{{ registration.group_code }}</strong>
+              {% if registration.is_from_last_import %}<br><span class="import-marker">Dernier import</span>{% endif %}
+              {% if registration.family %}<br>{{ registration.family }}{% endif %}
+              <br>{{ registration.school_level }}
+            </td>
+            <td>
+              {{ registration.institution.name }}<br>
+              {{ registration.institution.city }} ({{ registration.institution.department }})
+            </td>
+            <td>
+              {{ registration.teacher.first_name }} {{ registration.teacher.last_name }}<br>
+              <a href="mailto:{{ registration.teacher.email }}">{{ registration.teacher.email }}</a>
+            </td>
+            <td>
+              {{ registration.visit_date|date:"d/m/Y" }}<br>
+              <strong>{{ registration.total_participant_count }}</strong> personne{{ registration.total_participant_count|pluralize }}
+            </td>
+            <td>
+              <strong>{{ registration.active_reservation_count }}</strong>
+              animation{{ registration.active_reservation_count|pluralize }}
+            </td>
+            <td><span class="status-badge status-{{ registration.status|lower }}">{{ registration.get_status_display }}</span></td>
+            <td>
+              <div class="table-actions">
+                {% if registration.status == "DRAFT" %}
+                  <a class="button" href="{% url 'operations:registration-planning' registration.reference %}" aria-label="Choisir les animations du groupe {{ registration.group_code }}">Choisir les animations</a>
+                {% elif registration.status == "CONFIRMED" %}
+                  <a class="button" href="{% url 'operations:registration-planning' registration.reference %}" aria-label="Modifier les animations du groupe {{ registration.group_code }}">Modifier les animations</a>
+                {% endif %}
+                <a class="button button-secondary" href="{% url 'operations:registration-detail' registration.reference %}" aria-label="Voir la fiche du groupe {{ registration.group_code }}">Voir la fiche</a>
+              </div>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">Aucun groupe ne correspond à ces filtres.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if registration_page.has_other_pages %}
+    <nav aria-label="Pagination des groupes">
+      <p>
+        {% if registration_page.has_previous %}<a href="?{{ pagination_prefix }}page={{ registration_page.previous_page_number }}">Page précédente</a>{% endif %}
+        Page {{ registration_page.number }} sur {{ registration_page.paginator.num_pages }}
+        {% if registration_page.has_next %}<a href="?{{ pagination_prefix }}page={{ registration_page.next_page_number }}">Page suivante</a>{% endif %}
+      </p>
+    </nav>
+  {% endif %}
+{% endblock %}

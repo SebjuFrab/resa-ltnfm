@@ -30,6 +30,7 @@
       <nav class="container staff-nav" aria-label="Navigation de gestion">
         <a href="{% url 'operations:dashboard' %}">Tableau de bord</a>
         {% if perms.catalogue.view_session %}<a href="{% url 'operations:animation-list' %}">Animations</a>{% endif %}
+        {% if can_manage_registrations %}<a href="{% url 'operations:registration-list' %}">Groupes</a>{% endif %}
         {% if can_manage_registrations %}<a href="{% url 'operations:registration-create' %}">Nouveau groupe</a>{% endif %}
         {% if can_manage_registrations %}<a href="{% url 'operations:group-import' %}">Importer des groupes</a>{% endif %}
         {% if perms.catalogue.add_animation and perms.catalogue.change_animation and perms.catalogue.add_session %}<a href="{% url 'operations:session-import' %}">Importer des séances</a>{% endif %}

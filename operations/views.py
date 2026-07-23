@@ -11,7 +11,7 @@ from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -75,6 +75,7 @@ from .permissions import (
 
 IMPORT_SESSION_KEY = "operations_session_import_preview"
 GROUP_IMPORT_SESSION_KEY = "operations_group_import_preview"
+LAST_GROUP_IMPORT_SESSION_KEY = "operations_last_group_import"
 PENDING_REGISTRATION_UPDATE_KEY = "operations_pending_registration_updates"
 PERSONAL_DATA_PERMISSIONS = (
     "inscriptions.view_institution",
@@ -107,6 +108,31 @@ def _requested_date(request):
 
 def _requested_delimiter(request):
     return "," if request.GET.get("delimiter") == "comma" else ";"
+
+
+def _filter_registrations(queryset, search_form):
+    if not search_form.is_valid():
+        return queryset
+
+    query = search_form.cleaned_data["q"].strip()
+    if query:
+        filters = Q(institution__name__icontains=query) | Q(
+            group_name__icontains=query
+        )
+        filters |= Q(group_code__icontains=query)
+        filters |= Q(teacher__first_name__icontains=query)
+        filters |= Q(teacher__last_name__icontains=query)
+        filters |= Q(teacher__email__icontains=query)
+        try:
+            filters |= Q(reference=UUID(query))
+        except ValueError:
+            pass
+        queryset = queryset.filter(filters)
+    if search_form.cleaned_data["date"]:
+        queryset = queryset.filter(visit_date=search_form.cleaned_data["date"])
+    if search_form.cleaned_data["status"]:
+        queryset = queryset.filter(status=search_form.cleaned_data["status"])
+    return queryset
 
 
 @staff_member_required
@@ -170,23 +196,7 @@ def dashboard(request):
     registrations = Registration.objects.select_related(
         "institution", "teacher", "school_level"
     ).order_by("-created_at")
-    if search_form.is_valid():
-        query = search_form.cleaned_data["q"].strip()
-        if query:
-            filters = Q(institution__name__icontains=query) | Q(group_name__icontains=query)
-            filters |= Q(group_code__icontains=query)
-            filters |= Q(teacher__first_name__icontains=query)
-            filters |= Q(teacher__last_name__icontains=query)
-            filters |= Q(teacher__email__icontains=query)
-            try:
-                filters |= Q(reference=UUID(query))
-            except ValueError:
-                pass
-            registrations = registrations.filter(filters)
-        if search_form.cleaned_data["date"]:
-            registrations = registrations.filter(visit_date=search_form.cleaned_data["date"])
-        if search_form.cleaned_data["status"]:
-            registrations = registrations.filter(status=search_form.cleaned_data["status"])
+    registrations = _filter_registrations(registrations, search_form)
 
     page = Paginator(registrations, 50).get_page(request.GET.get("page"))
     for registration in page.object_list:
@@ -225,6 +235,58 @@ def dashboard(request):
         "pagination_prefix": f"{pagination_query.urlencode()}&" if pagination_query else "",
     }
     return render(request, "operations/dashboard.html", context)
+
+
+@staff_member_required
+@permission_required(REGISTRATION_MANAGE_PERMISSIONS, raise_exception=True)
+def registration_list(request):
+    filter_form = RegistrationSearchForm(request.GET or None)
+    registrations = (
+        Registration.objects.select_related(
+            "institution",
+            "teacher",
+            "family",
+            "school_level",
+        )
+        .annotate(
+            active_reservation_count=Count(
+                "reservations",
+                filter=Q(reservations__status=Reservation.Status.ACTIVE),
+            ),
+            status_order=Case(
+                When(status=Registration.Status.DRAFT, then=Value(0)),
+                When(status=Registration.Status.CONFIRMED, then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            ),
+        )
+        .order_by("status_order", "-created_at", "-pk")
+    )
+    registrations = _filter_registrations(registrations, filter_form)
+    page = Paginator(registrations, 50).get_page(request.GET.get("page"))
+    last_import_references = set(
+        request.session.get(LAST_GROUP_IMPORT_SESSION_KEY, ())
+    )
+    for registration in page.object_list:
+        registration.is_from_last_import = (
+            str(registration.reference) in last_import_references
+        )
+    pagination_query = request.GET.copy()
+    pagination_query.pop("page", None)
+    return render(
+        request,
+        "operations/registration_list.html",
+        {
+            "filter_form": filter_form,
+            "registration_page": page,
+            "draft_count": Registration.objects.filter(
+                status=Registration.Status.DRAFT
+            ).count(),
+            "pagination_prefix": (
+                f"{pagination_query.urlencode()}&" if pagination_query else ""
+            ),
+        },
+    )
 
 
 @staff_member_required
@@ -405,8 +467,11 @@ def group_import(request):
                 "operations/group_import.html",
                 {"form": GroupImportForm(), "issues": error.issues},
                 status=400,
-            )
+        )
         request.session.pop(GROUP_IMPORT_SESSION_KEY, None)
+        request.session[LAST_GROUP_IMPORT_SESSION_KEY] = [
+            str(registration.reference) for registration in registrations
+        ]
         count = len(registrations)
         imported_label = (
             "groupe importé comme brouillon"
@@ -421,7 +486,10 @@ def group_import(request):
                 "Aucun courriel n'a été envoyé."
             ),
         )
-        return redirect("operations:group-import")
+        return redirect(
+            f"{reverse('operations:registration-list')}"
+            f"?status={Registration.Status.DRAFT}"
+        )
 
     form = GroupImportForm(request.POST or None, request.FILES or None)
     preview = None

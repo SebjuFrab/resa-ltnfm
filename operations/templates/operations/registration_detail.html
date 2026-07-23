@@ -15,7 +15,7 @@
   <div class="actions">
     {% if registration.status != "CANCELLED" and can_manage_registrations %}
       <a class="button" href="{% url 'operations:registration-update' registration.reference %}">Modifier la fiche</a>
-      <a class="button" href="{% url 'operations:registration-planning' registration.reference %}">Modifier les animations</a>
+      <a class="button" href="{% url 'operations:registration-planning' registration.reference %}">{% if registration.status == "DRAFT" %}Choisir les animations{% else %}Modifier les animations{% endif %}</a>
       {% if registration.status == "CONFIRMED" %}
         <form method="post" action="{% url 'operations:registration-resend' registration.reference %}">{% csrf_token %}<button class="button-secondary" type="submit">Renvoyer le récapitulatif</button></form>
       {% endif %}
@@ -35,7 +35,7 @@
   <h2>Animations réservées</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Horaire</th><th>Animation</th><th>Lieu de RDV</th><th>Responsable</th><th>Participants</th></tr></thead>
+      <thead><tr><th scope="col">Horaire</th><th scope="col">Animation</th><th scope="col">Lieu de RDV</th><th scope="col">Responsable</th><th scope="col">Participants</th></tr></thead>
       <tbody>
         {% for reservation in reservations %}
           <tr><td>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</td><td>{{ reservation.session.animation.title }}</td><td>{{ reservation.session.location }}</td><td>{{ reservation.session.organizer|default:"—" }}</td><td>{{ reservation.student_count }} élèves + {{ reservation.chaperone_count }} accompagnateur{{ reservation.chaperone_count|pluralize }} = <strong>{{ reservation.total_participant_count }}</strong></td></tr>

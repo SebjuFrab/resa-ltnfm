@@ -617,6 +617,37 @@ tbody tr:last-child td {
   margin: 0;
 }
 
+.registration-list-table {
+  min-width: 68rem;
+}
+
+.table-actions {
+  display: flex;
+  min-width: 10rem;
+  flex-direction: column;
+  gap: .55rem;
+}
+
+.table-actions .button {
+  min-height: 2.25rem;
+  padding: .45rem .7rem;
+  font-size: .66rem;
+}
+
+.import-marker {
+  display: inline-flex;
+  margin-top: .35rem;
+  padding: .18rem .45rem;
+  color: #155341;
+  background: var(--brand-green-soft);
+  border: 1px solid var(--brand-green);
+  border-radius: 999px;
+  font-size: .62rem;
+  font-weight: 850;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
 dl {
   display: grid;
   grid-template-columns: minmax(9rem, .55fr) 1fr;

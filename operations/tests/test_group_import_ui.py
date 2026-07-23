@@ -155,14 +155,29 @@ class GroupImportViewTests(TestCase):
             follow=True,
         )
 
-        self.assertRedirects(response, reverse("operations:group-import"))
         registration = Registration.objects.get(group_code="chou-orange")
+        registration_list_url = reverse("operations:registration-list")
+        planning_url = reverse(
+            "operations:registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+        self.assertRedirects(
+            response,
+            f"{registration_list_url}?status={Registration.Status.DRAFT}",
+        )
         self.assertEqual(registration.status, Registration.Status.DRAFT)
         self.assertEqual(registration.total_participant_count, 26)
         self.assertEqual(Reservation.objects.count(), 0)
         self.assertEqual(Animation.objects.count(), animation_count)
         self.assertEqual(EmailLog.objects.count(), 0)
+        self.assertContains(response, registration.group_code)
+        self.assertContains(response, planning_url)
+        self.assertContains(response, "Dernier import")
         self.assertContains(response, "Aucun courriel")
+
+        planning_response = self.client.get(planning_url)
+        self.assertEqual(planning_response.status_code, 200)
+        self.assertContains(planning_response, registration.group_code)
 
     def test_cancel_discards_preview_without_creating_a_group(self):
         self.client.force_login(self.staff)

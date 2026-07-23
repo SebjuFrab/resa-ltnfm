@@ -6,6 +6,7 @@
   <h1>Tableau de bord</h1>
 
   <div class="actions">
+    {% if can_manage_registrations %}<a class="button" href="{% url 'operations:registration-list' %}">Gérer les groupes</a>{% endif %}
     {% if can_manage_registrations %}<a class="button" href="{% url 'operations:registration-create' %}">Inscrire un groupe</a>{% endif %}
     {% if can_manage_registrations %}<a class="button button-secondary" href="{% url 'operations:group-import' %}">Importer des groupes</a>{% endif %}
     {% if perms.catalogue.view_session %}<a class="button button-secondary" href="{% url 'operations:animation-list' %}">Voir les animations</a>{% endif %}
@@ -120,7 +121,12 @@
               <td>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}<br>{{ registration.teacher.email }}</td>
               <td>{{ registration.visit_date|date:"d/m/Y" }}</td>
               <td>{{ registration.get_status_display }}</td>
-              <td><a href="{{ registration.staff_detail_url }}">Ouvrir la fiche</a></td>
+              <td>
+                {% if can_manage_registrations and registration.status == "DRAFT" %}
+                  <a href="{% url 'operations:registration-planning' registration.reference %}">Choisir les animations</a><br>
+                {% endif %}
+                <a href="{{ registration.staff_detail_url }}">Ouvrir la fiche</a>
+              </td>
             </tr>
           {% empty %}<tr><td colspan="7">Aucune inscription trouvée.</td></tr>{% endfor %}
         </tbody>
