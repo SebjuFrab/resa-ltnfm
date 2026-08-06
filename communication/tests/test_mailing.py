@@ -27,6 +27,8 @@ from inscriptions.models import (
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     DEFAULT_FROM_EMAIL="organisation@example.test",
+    ORGANIZATION_EMAIL="contact@example.test",
+    ORGANIZATION_PHONE="02 00 00 00 00",
 )
 class MailingTests(TestCase):
     @classmethod
@@ -154,6 +156,19 @@ class MailingTests(TestCase):
         )
         return registration
 
+    def _assert_branded_message(self, message):
+        html_body = message.alternatives[0].content
+        self.assertIn("cid:ltnfm-logo", html_body)
+        self.assertIn("#f3b709", html_body)
+        self.assertIn("#14ad88", html_body)
+        self.assertEqual(message.mixed_subtype, "related")
+        self.assertTrue(
+            any(
+                attachment.get_content_type() == "image/jpeg"
+                for attachment in message.attachments
+            )
+        )
+
     def test_preview_counts_confirmed_teachers_and_deduplicated_organizer(self):
         preview = preview_mailing_recipients()
 
@@ -245,8 +260,12 @@ class MailingTests(TestCase):
             for message in mail.outbox
             if message.to == ["responsable@example.test"]
         )
+        self._assert_branded_message(teacher_message)
+        self._assert_branded_message(organizer_message)
         self.assertIn(self.first_registration.group_code, teacher_message.body)
         self.assertIn("Effectif total : 26", teacher_message.body)
+        self.assertIn("Email de contact : prof-a@example.test", teacher_message.body)
+        self.assertIn("Organisation du salon : contact@example.test", teacher_message.body)
         self.assertIn("Variables : Prénom a|Nom a|26", teacher_message.body)
         self.assertIn(
             "23/09/2026 · 10:00–10:45 · Le sol vivant — Pôle sols",
@@ -254,6 +273,14 @@ class MailingTests(TestCase):
         )
         self.assertIn(self.first_registration.group_code, organizer_message.body)
         self.assertIn(self.second_registration.group_code, organizer_message.body)
+        self.assertIn(
+            "Email de contact : responsable@example.test",
+            organizer_message.body,
+        )
+        self.assertIn(
+            "Organisation du salon : contact@example.test",
+            organizer_message.body,
+        )
         self.assertIn(
             "Variables : |Équipe graines, Équipe sols|47",
             organizer_message.body,

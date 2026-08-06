@@ -1,32 +1,57 @@
-<!doctype html>
-<html lang="fr">
-<head><meta charset="utf-8"><title>Modification de votre inscription</title></head>
-<body>
-  <h1>Inscription modifiée</h1>
-  <p>Bonjour {{ registration.teacher.first_name }} {{ registration.teacher.last_name }},</p>
-  <p>Vos modifications ont bien été enregistrées.</p>
-  <dl>
-    <dt>Établissement</dt><dd>{{ registration.institution.name }}</dd>
-    <dt>Groupe</dt><dd>{{ registration.group_name }}</dd>
-    <dt>Code du groupe</dt><dd><strong>{{ group_code }}</strong></dd>
-    <dt>Effectif total</dt><dd>{{ total_count }} — {{ registration.student_count }} élèves et {{ registration.chaperone_count }} accompagnateurs</dd>
-    <dt>Jour de visite</dt><dd>{{ registration.visit_date|date:"l j F Y" }}</dd>
-    <dt>Référence</dt><dd>{{ registration.reference }}</dd>
-  </dl>
-  <h2>Programme mis à jour</h2>
-  <ul>
-    {% for reservation in reservations %}
-      <li>
-        <strong>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }} — {{ reservation.session.animation.title }}</strong><br>
-        {{ reservation.session.location }} — {{ reservation.total_participant_count }} personnes ({{ reservation.student_count }} élèves + {{ reservation.chaperone_count }} professeurs/accompagnateurs)
-        {% if reservation.session.animation.instructions %}<br>Consignes : {{ reservation.session.animation.instructions }}{% endif %}
-      </li>
-    {% empty %}<li>Aucune séance réservée.</li>{% endfor %}
-  </ul>
+{% extends "emails/base.html" %}
+
+{% block title %}Modification de votre inscription{% endblock %}
+{% block preheader %}Les modifications de votre inscription ont bien été enregistrées.{% endblock %}
+
+{% block content %}
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td width="48" valign="top" style="width:48px;">
+        <div style="width:38px;height:38px;border-radius:50%;background:#f3b709;color:#2f3032;font-size:23px;font-weight:900;line-height:38px;text-align:center;">✓</div>
+      </td>
+      <td valign="middle"><h1 style="margin:0;color:#2f3032;font-size:27px;line-height:1.15;">Votre inscription est mise à jour</h1></td>
+    </tr>
+  </table>
+  <p style="margin:24px 0 8px;font-size:16px;line-height:1.6;">Bonjour <strong>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}</strong>,</p>
+  <p style="margin:0 0 20px;font-size:16px;line-height:1.6;">Vos modifications ont bien été enregistrées. Voici votre nouveau récapitulatif.</p>
+
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fff7d6;border-left:5px solid #f3b709;border-radius:8px;">
+    <tr>
+      <td style="padding:18px 20px;">
+        <p style="margin:0 0 14px;color:#6b5100;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Votre groupe</p>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr><td class="summary-label" width="34%" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Établissement</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ registration.institution.name }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Groupe</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ registration.group_name }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Code du groupe</td><td style="padding:0 0 10px;font-size:17px;font-weight:900;">{{ group_code }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Jour de visite</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ registration.visit_date|date:"l j F Y" }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Participants</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ total_count }} personnes — {{ registration.student_count }} élèves et {{ registration.chaperone_count }} accompagnateurs</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 0 0;color:#6d6e70;font-size:13px;">Email de contact</td><td style="font-size:14px;font-weight:700;"><a href="mailto:{{ contact_email }}" style="color:#087f68;">{{ contact_email }}</a></td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <h2 style="margin:26px 0 4px;font-size:23px;">Programme mis à jour</h2>
+  <div style="width:56px;height:5px;margin:0 0 12px;background:#f3b709;border-radius:3px;"></div>
+  {% for reservation in reservations %}
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 12px;border:1px solid #deddd7;border-top:4px solid #14ad88;border-radius:8px;">
+      <tr>
+        <td style="padding:16px 18px;">
+          <p style="margin:0 0 7px;color:#6b5100;font-size:12px;font-weight:800;text-transform:uppercase;">{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</p>
+          <h3 style="margin:0 0 8px;font-size:18px;">{{ reservation.session.animation.title }}</h3>
+          <p style="margin:0 0 4px;color:#55575a;font-size:14px;"><strong>Lieu :</strong> {{ reservation.session.location }}</p>
+          <p style="margin:0;color:#55575a;font-size:14px;"><strong>Inscrits :</strong> {{ reservation.total_participant_count }} personnes ({{ reservation.student_count }} élèves + {{ reservation.chaperone_count }} professeurs/accompagnateurs)</p>
+          {% if reservation.session.animation.instructions %}<p style="margin:12px 0 0;padding:10px 12px;background:#eaf8f4;color:#155341;font-size:13px;border-radius:5px;"><strong>À prévoir :</strong> {{ reservation.session.animation.instructions }}</p>{% endif %}
+          {% if reservation.session.organizer or reservation.session.organizer_email %}<p style="margin:11px 0 0;color:#55575a;font-size:13px;"><strong>Contact de l’animation :</strong> {{ reservation.session.organizer }}{% if reservation.session.organizer_email %}{% if reservation.session.organizer %} — {% endif %}<a href="mailto:{{ reservation.session.organizer_email }}" style="color:#087f68;">{{ reservation.session.organizer_email }}</a>{% endif %}</p>{% endif %}
+        </td>
+      </tr>
+    </table>
+  {% empty %}
+    <p style="color:#55575a;">Aucune animation réservée.</p>
+  {% endfor %}
+
   {% if edit_url %}
-    <p><a href="{{ edit_url }}">Consulter ou modifier mon inscription</a></p>
-    <p>Les modifications sont possibles jusqu'au {{ edit_deadline|date:"d/m/Y \u00e0 H:i" }}.</p>
+    <p style="margin:22px 0 10px;text-align:center;"><a href="{{ edit_url }}" style="display:inline-block;padding:13px 20px;background:#2f3032;color:#ffffff;font-size:13px;font-weight:800;text-decoration:none;text-transform:uppercase;border-radius:24px;border-bottom:4px solid #f3b709;">Consulter ou modifier mon inscription</a></p>
+    <p style="margin:0;color:#6d6e70;font-size:12px;text-align:center;">Modifications possibles jusqu’au {{ edit_deadline|date:"d/m/Y \u00e0 H:i" }}.</p>
   {% endif %}
-  <p>Contact : <a href="mailto:{{ organization_email }}">{{ organization_email }}</a>{% if organization_phone %} — {{ organization_phone }}{% endif %}</p>
-</body>
-</html>
+{% endblock %}

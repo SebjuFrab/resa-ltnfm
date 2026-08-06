@@ -5,9 +5,8 @@ L'inscription suivante au salon La Terre est Notre Métier a bien été annulée
 Établissement : {{ registration.institution.name }}
 Groupe : {{ registration.group_name }}
 Jour de visite : {{ registration.visit_date|date:"l j F Y" }}
-Référence : {{ registration.reference }}
+Email de contact : {{ contact_email }}
 
 Les places réservées ont été libérées.
 
-Contact : {{ organization_email }}{% if organization_phone %} — {{ organization_phone }}{% endif %}
-
+Organisation du salon : {{ organization_email }}{% if organization_phone %} — {{ organization_phone }}{% endif %}

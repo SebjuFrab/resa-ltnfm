@@ -66,7 +66,7 @@ def _record_delivery_event(email_log):
     )
 
 
-def _attach_confirmation_logo(message):
+def _attach_brand_logo(message):
     logo_path = settings.BASE_DIR / "static" / "images" / "logo-ltnfm-2020.jpg"
     with logo_path.open("rb") as logo_file:
         logo = MIMEImage(logo_file.read(), _subtype="jpeg")
@@ -123,8 +123,7 @@ def send_registration_email(registration, kind, *, edit_url=""):
             to=[recipient],
         )
         message.attach_alternative(html_body, "text/html")
-        if kind == EmailLog.Kind.CONFIRMATION:
-            _attach_confirmation_logo(message)
+        _attach_brand_logo(message)
         sent_count = message.send(fail_silently=False)
         if sent_count != 1:
             raise RuntimeError("Le serveur de courriel n'a accepté aucun message.")

@@ -85,6 +85,19 @@ class EmailServiceTests(TestCase):
             chaperone_count=2,
         )
 
+    def _assert_branded_message(self, message):
+        html_body = message.alternatives[0].content
+        self.assertIn("cid:ltnfm-logo", html_body)
+        self.assertIn("#f3b709", html_body)
+        self.assertIn("#14ad88", html_body)
+        self.assertEqual(message.mixed_subtype, "related")
+        self.assertTrue(
+            any(
+                attachment.get_content_type() == "image/jpeg"
+                for attachment in message.attachments
+            )
+        )
+
     def test_confirmation_sends_text_and_html_and_logs_success(self):
         email_log = send_confirmation_email(
             self.registration,
@@ -124,20 +137,19 @@ class EmailServiceTests(TestCase):
         self.assertIn("#14ad88", html_body)
         self.assertIn("Email de contact", html_body)
         self.assertNotIn(str(self.registration.reference), html_body)
-        self.assertEqual(message.mixed_subtype, "related")
-        self.assertTrue(
-            any(
-                attachment.get_content_type() == "image/jpeg"
-                for attachment in message.attachments
-            )
-        )
+        self._assert_branded_message(message)
 
     def test_modification_no_longer_requires_an_edit_link(self):
         send_modification_email(self.registration)
 
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn("Effectif total : 26", mail.outbox[0].body)
-        self.assertNotIn("Consulter ou modifier", mail.outbox[0].body)
+        message = mail.outbox[0]
+        self.assertIn("Effectif total : 26", message.body)
+        self.assertIn("Email de contact : marie@example.test", message.body)
+        self.assertNotIn("Référence", message.body)
+        self.assertNotIn(str(self.registration.reference), message.body)
+        self.assertNotIn("Consulter ou modifier", message.body)
+        self._assert_branded_message(message)
 
     @patch("communication.services.EmailMultiAlternatives.send")
     def test_smtp_failure_is_sanitized_logged_and_not_raised(self, mocked_send):
@@ -180,4 +192,9 @@ class EmailServiceTests(TestCase):
         send_cancellation_email(self.registration)
 
         self.assertEqual(len(mail.outbox), 1)
-        self.assertNotIn("modifier mon inscription", mail.outbox[0].body.lower())
+        message = mail.outbox[0]
+        self.assertIn("Email de contact : marie@example.test", message.body)
+        self.assertNotIn("Référence", message.body)
+        self.assertNotIn(str(self.registration.reference), message.body)
+        self.assertNotIn("modifier mon inscription", message.body.lower())
+        self._assert_branded_message(message)

@@ -20,7 +20,7 @@ from inscriptions.models import Registration, Reservation
 
 from .models import MailingCampaign, MailingDelivery
 from .rich_text import rich_html_to_text, sanitize_rich_html
-from .services import _safe_error_summary
+from .services import _attach_brand_logo, _safe_error_summary
 
 MAILING_TEMPLATE_VARIABLES = (
     {
@@ -561,6 +561,8 @@ def _render_delivery(delivery):
         "personalized_body_text": _personalize_content(
             delivery.campaign.body_text, values
         ),
+        "organization_email": settings.ORGANIZATION_EMAIL,
+        "organization_phone": settings.ORGANIZATION_PHONE,
     }
     template = (
         "mailing_teacher"
@@ -614,6 +616,7 @@ def send_mailing_delivery(delivery_or_id, *, retry_failed=False):
             to=[delivery.recipient],
         )
         message.attach_alternative(html_body, "text/html")
+        _attach_brand_logo(message)
         sent_count = message.send(fail_silently=False)
         if sent_count != 1:
             raise RuntimeError("Le serveur de courriel n’a accepté aucun message.")

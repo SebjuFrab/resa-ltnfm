@@ -1,26 +1,52 @@
-<!doctype html>
-<html lang="fr">
-<head><meta charset="utf-8"><title>{{ campaign.subject }}</title></head>
-<body>
-  <p>Bonjour{% if delivery.recipient_name %} {{ delivery.recipient_name }}{% endif %},</p>
-  <div>{{ personalized_body_html|safe }}</div>
-  <h2>Récapitulatif des groupes attendus</h2>
+{% extends "emails/base.html" %}
+
+{% block title %}{{ campaign.subject }}{% endblock %}
+{% block preheader %}Récapitulatif des groupes attendus sur vos animations.{% endblock %}
+
+{% block content %}
+  <p style="margin:0 0 8px;color:#6b5100;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Informations aux responsables d’animation</p>
+  <h1 style="margin:0 0 22px;color:#2f3032;font-size:27px;line-height:1.15;">{{ campaign.subject }}</h1>
+  <p style="margin:0 0 14px;font-size:16px;line-height:1.6;">Bonjour{% if delivery.recipient_name %} <strong>{{ delivery.recipient_name }}</strong>{% endif %},</p>
+  <div style="margin:0 0 20px;padding:16px 18px;background:#eaf8f4;color:#155341;font-size:15px;line-height:1.6;border-left:5px solid #14ad88;border-radius:7px;">{{ personalized_body_html|safe }}</div>
+  <p style="margin:0 0 24px;color:#55575a;font-size:13px;"><strong>Email de contact :</strong> <a href="mailto:{{ delivery.recipient }}" style="color:#087f68;">{{ delivery.recipient }}</a></p>
+
+  <h2 style="margin:0 0 4px;font-size:22px;">Groupes attendus</h2>
+  <div style="width:56px;height:5px;margin:0 0 14px;background:#f3b709;border-radius:3px;"></div>
   {% for session in snapshot.sessions %}
-    <h3>{{ session.date_label }} · {{ session.starts_at }}–{{ session.ends_at }} · {{ session.animation }}</h3>
-    <p>Lieu de rendez-vous : {{ session.location }}<br>Effectif total : <strong>{{ session.total_count }}</strong></p>
-    <table>
-      <thead><tr><th>Groupe</th><th>Établissement</th><th>Professeur</th><th>Effectif</th></tr></thead>
-      <tbody>
-        {% for group in session.groups %}
-          <tr>
-            <td>{{ group.group_code }}</td>
-            <td>{{ group.institution }}</td>
-            <td>{{ group.teacher_name }} — {{ group.teacher_email }}</td>
-            <td>{{ group.total_count }} ({{ group.student_count }} élèves + {{ group.chaperone_count }} accompagnateurs)</td>
-          </tr>
-        {% endfor %}
-      </tbody>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 16px;border:1px solid #deddd7;border-top:4px solid #ea5433;border-radius:8px;">
+      <tr>
+        <td style="padding:16px 18px 10px;">
+          <p style="margin:0 0 7px;color:#6b5100;font-size:12px;font-weight:800;text-transform:uppercase;">{{ session.date_label }} · {{ session.starts_at }}–{{ session.ends_at }}</p>
+          <h3 style="margin:0 0 7px;font-size:18px;">{{ session.animation }}</h3>
+          <p style="margin:0;color:#55575a;font-size:14px;"><strong>Lieu :</strong> {{ session.location }} · <strong>{{ session.total_count }}</strong> personnes attendues</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:7px 10px 14px;">
+          <table width="100%" cellspacing="0" cellpadding="7" border="0" class="group-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+              <tr style="background:#2f3032;color:#ffffff;">
+                <th align="left">Groupe</th>
+                <th align="left">Établissement</th>
+                <th align="left">Contact</th>
+                <th align="right">Effectif</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for group in session.groups %}
+                <tr style="border-bottom:1px solid #deddd7;">
+                  <td valign="top"><strong>{{ group.group_code }}</strong></td>
+                  <td valign="top">{{ group.institution }}</td>
+                  <td valign="top">{{ group.teacher_name }}<br><a href="mailto:{{ group.teacher_email }}" style="color:#087f68;">{{ group.teacher_email }}</a></td>
+                  <td align="right" valign="top"><strong>{{ group.total_count }}</strong><br>{{ group.student_count }} + {{ group.chaperone_count }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </td>
+      </tr>
     </table>
-  {% empty %}<p>Aucun groupe inscrit.</p>{% endfor %}
-</body>
-</html>
+  {% empty %}
+    <p style="padding:14px;background:#fff7d6;color:#6b5100;border-radius:6px;">Aucun groupe inscrit.</p>
+  {% endfor %}
+{% endblock %}

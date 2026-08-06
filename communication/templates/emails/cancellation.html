@@ -1,18 +1,33 @@
-<!doctype html>
-<html lang="fr">
-<head><meta charset="utf-8"><title>Annulation de votre inscription</title></head>
-<body>
-  <h1>Inscription annulée</h1>
-  <p>Bonjour {{ registration.teacher.first_name }} {{ registration.teacher.last_name }},</p>
-  <p>L'inscription suivante a bien été annulée :</p>
-  <dl>
-    <dt>Établissement</dt><dd>{{ registration.institution.name }}</dd>
-    <dt>Groupe</dt><dd>{{ registration.group_name }}</dd>
-    <dt>Jour de visite</dt><dd>{{ registration.visit_date|date:"l j F Y" }}</dd>
-    <dt>Référence</dt><dd>{{ registration.reference }}</dd>
-  </dl>
-  <p>Les places réservées ont été libérées.</p>
-  <p>Contact : <a href="mailto:{{ organization_email }}">{{ organization_email }}</a>{% if organization_phone %} — {{ organization_phone }}{% endif %}</p>
-</body>
-</html>
+{% extends "emails/base.html" %}
 
+{% block title %}Annulation de votre inscription{% endblock %}
+{% block preheader %}Votre inscription à La Terre est Notre Métier a été annulée.{% endblock %}
+
+{% block content %}
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td width="48" valign="top" style="width:48px;">
+        <div style="width:38px;height:38px;border-radius:50%;background:#ea5433;color:#ffffff;font-size:24px;font-weight:900;line-height:36px;text-align:center;">×</div>
+      </td>
+      <td valign="middle"><h1 style="margin:0;color:#2f3032;font-size:27px;line-height:1.15;">Votre inscription est annulée</h1></td>
+    </tr>
+  </table>
+  <p style="margin:24px 0 8px;font-size:16px;line-height:1.6;">Bonjour <strong>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}</strong>,</p>
+  <p style="margin:0 0 20px;font-size:16px;line-height:1.6;">L’inscription de votre groupe au salon <strong>La Terre est Notre Métier</strong> a bien été annulée.</p>
+
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fff0ec;border-left:5px solid #ea5433;border-radius:8px;">
+    <tr>
+      <td style="padding:18px 20px;">
+        <p style="margin:0 0 14px;color:#a63821;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Groupe annulé</p>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr><td class="summary-label" width="34%" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Établissement</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ registration.institution.name }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Groupe</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ registration.group_name }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Jour prévu</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ registration.visit_date|date:"l j F Y" }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 0 0;color:#6d6e70;font-size:13px;">Email de contact</td><td style="font-size:14px;font-weight:700;"><a href="mailto:{{ contact_email }}" style="color:#a63821;">{{ contact_email }}</a></td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <p style="margin:22px 0 0;padding:13px 15px;background:#eaf8f4;color:#155341;font-size:14px;line-height:1.5;border-radius:6px;border-left:4px solid #14ad88;"><strong>Les places précédemment réservées ont été libérées.</strong></p>
+{% endblock %}
