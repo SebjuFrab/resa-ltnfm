@@ -97,6 +97,7 @@ compose up --detach --remove-orphans --wait --wait-timeout 180
 
 echo "7/7 - Contrôle final"
 compose exec -T web python manage.py check --deploy
+compose exec -T web python manage.py migrate --check
 compose ps
 
 app_port=$(sed -n 's/^APP_HTTP_PORT=//p' "$ENV_FILE" | tail -n 1)
