@@ -536,19 +536,25 @@ class MailingForm(forms.Form):
     family = forms.ModelChoiceField(
         label="Famille", queryset=GroupFamily.objects.none(), required=False
     )
-    subject = forms.CharField(label="Objet pour les responsables de groupe", max_length=255)
+    subject = forms.CharField(
+        label="Objet pour les responsables de groupe", max_length=255, required=False
+    )
     body_html = forms.CharField(
         label="Message aux responsables de groupe",
         widget=forms.Textarea,
         max_length=50_000,
+        required=False,
     )
     organizer_subject = forms.CharField(
-        label="Objet pour les responsables d’animation", max_length=255
+        label="Objet pour les responsables d’animation",
+        max_length=255,
+        required=False,
     )
     organizer_body_html = forms.CharField(
         label="Message aux responsables d’animation",
         widget=forms.Textarea,
         max_length=50_000,
+        required=False,
     )
     confirm_missing = forms.BooleanField(
         label="Je confirme l'envoi malgré les adresses manquantes.",
@@ -568,3 +574,16 @@ class MailingForm(forms.Form):
     def clean_visit_date(self):
         value = self.cleaned_data["visit_date"]
         return date.fromisoformat(value) if value else None
+
+    def clean(self):
+        cleaned = super().clean()
+        action = self.data.get("action", "")
+        required_fields = []
+        if action in {"send", "send_both", "send_groups"}:
+            required_fields.extend(("subject", "body_html"))
+        if action in {"send", "send_both", "send_organizers"}:
+            required_fields.extend(("organizer_subject", "organizer_body_html"))
+        for field_name in required_fields:
+            if field_name not in self.errors and not cleaned.get(field_name):
+                self.add_error(field_name, "Ce champ est obligatoire pour cet envoi.")
+        return cleaned

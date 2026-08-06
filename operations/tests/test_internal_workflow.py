@@ -1113,6 +1113,9 @@ class InternalRegistrationWorkflowTests(TestCase):
             self.assertContains(response, template_variable)
         self.assertContains(response, "Message aux responsables de groupe")
         self.assertContains(response, "Message aux responsables d’animation")
+        self.assertContains(response, "Envoyer aux responsables de groupe")
+        self.assertContains(response, "Envoyer aux responsables d’animation")
+        self.assertContains(response, "Envoyer aux deux publics")
 
         response = self.client.post(
             reverse("operations:mailing-create"),
@@ -1167,6 +1170,117 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertContains(detail_response, "Préparer l’accueil des groupes")
         self.assertContains(detail_response, "Responsables de groupe")
         self.assertContains(detail_response, "Responsables d’animation")
+
+    def test_final_mailing_can_send_each_audience_separately(self):
+        self.create_and_confirm_registration()
+        mail.outbox.clear()
+
+        group_response = self.client.post(
+            reverse("operations:mailing-create"),
+            {
+                "visit_date": "2026-09-23",
+                "family": str(self.family.pk),
+                "subject": "Message pour le groupe",
+                "body_html": "<p>Uniquement pour le responsable du groupe.</p>",
+                "idempotency_key": "mailing-group-only",
+                "action": "send_groups",
+            },
+        )
+
+        group_campaign = MailingCampaign.objects.get(
+            idempotency_key="mailing-group-only"
+        )
+        self.assertRedirects(
+            group_response,
+            reverse(
+                "operations:mailing-detail",
+                kwargs={"campaign_id": group_campaign.pk},
+            ),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(group_campaign.deliveries.count(), 1)
+        self.assertEqual(group_campaign.audience, MailingCampaign.Audience.GROUPS)
+        self.assertFalse(
+            group_campaign.deliveries.exclude(
+                recipient_kind=MailingDelivery.RecipientKind.TEACHER
+            ).exists()
+        )
+        self.assertEqual([message.to for message in mail.outbox], [["camille@example.test"]])
+
+        mail.outbox.clear()
+        organizer_response = self.client.post(
+            reverse("operations:mailing-create"),
+            {
+                "visit_date": "2026-09-23",
+                "family": str(self.family.pk),
+                "organizer_subject": "Message pour l’animation",
+                "organizer_body_html": "<p>Uniquement pour l’animation.</p>",
+                "idempotency_key": "mailing-organizer-only",
+                "action": "send_organizers",
+            },
+        )
+
+        organizer_campaign = MailingCampaign.objects.get(
+            idempotency_key="mailing-organizer-only"
+        )
+        self.assertRedirects(
+            organizer_response,
+            reverse(
+                "operations:mailing-detail",
+                kwargs={"campaign_id": organizer_campaign.pk},
+            ),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(organizer_campaign.deliveries.count(), 1)
+        self.assertEqual(
+            organizer_campaign.audience, MailingCampaign.Audience.ORGANIZERS
+        )
+        self.assertFalse(
+            organizer_campaign.deliveries.exclude(
+                recipient_kind=MailingDelivery.RecipientKind.ORGANIZER
+            ).exists()
+        )
+        self.assertEqual([message.to for message in mail.outbox], [["animation@example.test"]])
+
+    def test_single_audience_ignores_missing_addresses_from_the_other_audience(self):
+        registration = self.create_and_confirm_registration()
+        mail.outbox.clear()
+        self.session.organizer_email = ""
+        self.session.save(update_fields=("organizer_email",))
+
+        group_response = self.client.post(
+            reverse("operations:mailing-create"),
+            {
+                "subject": "Informations du groupe",
+                "body_html": "<p>Message au groupe.</p>",
+                "idempotency_key": "group-without-organizer-address",
+                "action": "send_groups",
+            },
+        )
+
+        self.assertEqual(group_response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["camille@example.test"])
+
+        mail.outbox.clear()
+        self.session.organizer_email = "animation@example.test"
+        self.session.save(update_fields=("organizer_email",))
+        registration.teacher.email = ""
+        registration.teacher.save(update_fields=("email",))
+
+        organizer_response = self.client.post(
+            reverse("operations:mailing-create"),
+            {
+                "organizer_subject": "Informations de l’animation",
+                "organizer_body_html": "<p>Message à l’animation.</p>",
+                "idempotency_key": "organizer-without-group-address",
+                "action": "send_organizers",
+            },
+        )
+
+        self.assertEqual(organizer_response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["animation@example.test"])
 
     def test_final_mailing_requires_confirmation_for_missing_organizer_email(self):
         self.session.organizer_email = ""

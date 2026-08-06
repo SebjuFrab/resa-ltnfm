@@ -52,15 +52,26 @@ class MailingCampaign(models.Model):
         PARTIAL = "PARTIAL", "Partiellement envoyé"
         FAILED = "FAILED", "Échec"
 
+    class Audience(models.TextChoices):
+        GROUPS = "GROUPS", "Responsables de groupe"
+        ORGANIZERS = "ORGANIZERS", "Responsables d’animation"
+        BOTH = "BOTH", "Les deux publics"
+
     reference = models.UUIDField(
         "référence", default=uuid.uuid4, unique=True, editable=False
     )
     idempotency_key = models.CharField(
         "clé d’idempotence", max_length=100, unique=True, null=True, blank=True
     )
-    subject = models.CharField("objet pour les responsables de groupe", max_length=255)
-    body_html = models.TextField("contenu enrichi pour les responsables de groupe")
-    body_text = models.TextField("contenu texte pour les responsables de groupe")
+    subject = models.CharField(
+        "objet pour les responsables de groupe", max_length=255, blank=True
+    )
+    body_html = models.TextField(
+        "contenu enrichi pour les responsables de groupe", blank=True
+    )
+    body_text = models.TextField(
+        "contenu texte pour les responsables de groupe", blank=True
+    )
     organizer_subject = models.CharField(
         "objet pour les responsables d’animation", max_length=255, blank=True
     )
@@ -69,6 +80,13 @@ class MailingCampaign(models.Model):
     )
     organizer_body_text = models.TextField(
         "contenu texte pour les responsables d’animation", blank=True
+    )
+    audience = models.CharField(
+        "public",
+        max_length=10,
+        choices=Audience.choices,
+        default=Audience.BOTH,
+        db_index=True,
     )
     visit_date = models.DateField("jour filtré", null=True, blank=True, db_index=True)
     family_filter = models.CharField(
@@ -97,7 +115,7 @@ class MailingCampaign(models.Model):
         permissions = (("send_mailing", "Peut envoyer un publipostage"),)
 
     def __str__(self):
-        return f"{self.subject} — {self.reference}"
+        return f"{self.subject or self.organizer_subject} — {self.reference}"
 
     @property
     def sent_count(self):

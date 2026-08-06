@@ -333,6 +333,47 @@ class MailingTests(TestCase):
         self.assertEqual(len(mail.outbox), 3)
         self.assertEqual(second.skipped_count, 3)
 
+    def test_campaign_can_target_each_audience_separately(self):
+        group_result = create_and_send_mailing(
+            subject="Message réservé aux groupes",
+            body_html="<p>Contenu pour les groupes.</p>",
+            recipient_kinds=(MailingDelivery.RecipientKind.TEACHER,),
+        )
+
+        self.assertEqual(group_result.sent_count, 2)
+        self.assertEqual(
+            group_result.campaign.audience, MailingCampaign.Audience.GROUPS
+        )
+        self.assertFalse(
+            group_result.campaign.deliveries.exclude(
+                recipient_kind=MailingDelivery.RecipientKind.TEACHER
+            ).exists()
+        )
+        self.assertTrue(
+            all(message.subject == "Message réservé aux groupes" for message in mail.outbox)
+        )
+
+        mail.outbox.clear()
+        organizer_result = create_and_send_mailing(
+            organizer_subject="Message réservé aux animations",
+            organizer_body_html="<p>Contenu pour les animations.</p>",
+            recipient_kinds=(MailingDelivery.RecipientKind.ORGANIZER,),
+        )
+
+        self.assertEqual(organizer_result.sent_count, 1)
+        self.assertEqual(
+            organizer_result.campaign.audience,
+            MailingCampaign.Audience.ORGANIZERS,
+        )
+        self.assertFalse(
+            organizer_result.campaign.deliveries.exclude(
+                recipient_kind=MailingDelivery.RecipientKind.ORGANIZER
+            ).exists()
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].subject, "Message réservé aux animations")
+        self.assertIn("Contenu pour les animations", mail.outbox[0].body)
+
     def test_template_variables_escape_html_and_use_frozen_snapshot(self):
         teacher = self.first_registration.teacher
         teacher.first_name = "<Marie>"

@@ -88,7 +88,8 @@ class MailingCampaignAdmin(admin.ModelAdmin):
     actions = ("retry_failed",)
     list_display = (
         "created_at",
-        "subject",
+        "campaign_subject",
+        "audience",
         "visit_date",
         "family_label",
         "status",
@@ -97,7 +98,7 @@ class MailingCampaignAdmin(admin.ModelAdmin):
         "failed_delivery_count",
         "created_by",
     )
-    list_filter = ("status", "visit_date", "created_at")
+    list_filter = ("audience", "status", "visit_date", "created_at")
     search_fields = (
         "reference",
         "subject",
@@ -114,6 +115,7 @@ class MailingCampaignAdmin(admin.ModelAdmin):
         "organizer_subject",
         "organizer_body_html",
         "organizer_body_text",
+        "audience",
         "visit_date",
         "family_filter",
         "family_label",
@@ -134,6 +136,10 @@ class MailingCampaignAdmin(admin.ModelAdmin):
 
     def has_send_mailing_permission(self, request):
         return request.user.has_perm("communication.send_mailing")
+
+    @admin.display(description="Objet", ordering="subject")
+    def campaign_subject(self, campaign):
+        return campaign.subject or campaign.organizer_subject
 
     @admin.display(description="Destinataires")
     def delivery_count(self, campaign):

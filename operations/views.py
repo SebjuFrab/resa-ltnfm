@@ -1259,6 +1259,18 @@ def registration_resend(request, reference):
 @permission_required("communication.send_mailing", raise_exception=True)
 @require_http_methods(["GET", "POST"])
 def mailing_create(request):
+    send_actions = {
+        "send": (
+            MailingDelivery.RecipientKind.TEACHER,
+            MailingDelivery.RecipientKind.ORGANIZER,
+        ),
+        "send_both": (
+            MailingDelivery.RecipientKind.TEACHER,
+            MailingDelivery.RecipientKind.ORGANIZER,
+        ),
+        "send_groups": (MailingDelivery.RecipientKind.TEACHER,),
+        "send_organizers": (MailingDelivery.RecipientKind.ORGANIZER,),
+    }
     initial = {
         "subject": "Informations pratiques pour votre groupe — La Terre est Notre Métier",
         "body_html": (
@@ -1282,10 +1294,15 @@ def mailing_create(request):
         preview = preview_mailing_recipients(
             visit_date=data["visit_date"], family=data["family"]
         )
-        if request.POST.get("action") == "send":
+        action = request.POST.get("action", "")
+        if action in send_actions:
+            recipient_kinds = send_actions[action]
             has_missing_addresses = (
-                preview.missing_teacher_email_count
-                or preview.missing_organizer_email_count
+                MailingDelivery.RecipientKind.TEACHER in recipient_kinds
+                and preview.missing_teacher_email_count
+            ) or (
+                MailingDelivery.RecipientKind.ORGANIZER in recipient_kinds
+                and preview.missing_organizer_email_count
             )
             if has_missing_addresses and not data["confirm_missing"]:
                 form.add_error(
@@ -1303,6 +1320,7 @@ def mailing_create(request):
                         visit_date=data["visit_date"],
                         family=data["family"],
                         idempotency_key=request.POST.get("idempotency_key") or None,
+                        recipient_kinds=recipient_kinds,
                     )
                 except ValueError as error:
                     form.add_error(None, str(error))
@@ -1370,9 +1388,11 @@ def mailing_detail(request, campaign_id):
             "group_sent_count": group_deliveries.filter(
                 status=MailingDelivery.Status.SENT
             ).count(),
+            "has_group_deliveries": group_deliveries.exists(),
             "organizer_sent_count": organizer_deliveries.filter(
                 status=MailingDelivery.Status.SENT
             ).count(),
+            "has_organizer_deliveries": organizer_deliveries.exists(),
             "sent_count": deliveries.filter(
                 status=MailingDelivery.Status.SENT
             ).count(),

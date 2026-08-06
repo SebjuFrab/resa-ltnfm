@@ -364,6 +364,27 @@ def preview_mailing_recipients(*, visit_date=None, family=None):
     return preview
 
 
+def _normalized_recipient_kinds(recipient_kinds):
+    allowed = {
+        MailingDelivery.RecipientKind.TEACHER,
+        MailingDelivery.RecipientKind.ORGANIZER,
+    }
+    if recipient_kinds is None:
+        return frozenset(allowed)
+    normalized = frozenset(str(kind) for kind in recipient_kinds)
+    if not normalized or not normalized.issubset(allowed):
+        raise ValueError("Le public choisi pour le publipostage n’est pas valide.")
+    return normalized
+
+
+def _audience_for_recipient_kinds(recipient_kinds):
+    if recipient_kinds == {MailingDelivery.RecipientKind.TEACHER}:
+        return MailingCampaign.Audience.GROUPS
+    if recipient_kinds == {MailingDelivery.RecipientKind.ORGANIZER}:
+        return MailingCampaign.Audience.ORGANIZERS
+    return MailingCampaign.Audience.BOTH
+
+
 def _validated_content(subject, body_html):
     subject = " ".join(str(subject or "").split())
     if not subject:
@@ -399,6 +420,7 @@ def _same_idempotent_request(
     body_html,
     organizer_subject,
     organizer_body_html,
+    audience,
     visit_date,
     family_filter,
 ):
@@ -407,6 +429,7 @@ def _same_idempotent_request(
         and campaign.body_html == body_html
         and campaign.organizer_subject == organizer_subject
         and campaign.organizer_body_html == organizer_body_html
+        and campaign.audience == audience
         and campaign.visit_date == visit_date
         and campaign.family_filter == family_filter
     )
@@ -414,24 +437,39 @@ def _same_idempotent_request(
 
 def create_mailing_campaign(
     *,
-    subject,
-    body_html,
+    subject=None,
+    body_html=None,
     organizer_subject=None,
     organizer_body_html=None,
     created_by=None,
     visit_date=None,
     family=None,
     idempotency_key=None,
+    recipient_kinds=None,
 ):
     """Freeze recipients and personalized context without sending messages."""
-    subject, cleaned_html, body_text = _validated_content(subject, body_html)
-    if organizer_subject is None:
-        organizer_subject = subject
-    if organizer_body_html is None:
-        organizer_body_html = cleaned_html
-    organizer_subject, organizer_cleaned_html, organizer_body_text = (
-        _validated_content(organizer_subject, organizer_body_html)
-    )
+    recipient_kinds = _normalized_recipient_kinds(recipient_kinds)
+    audience = _audience_for_recipient_kinds(recipient_kinds)
+    sends_to_groups = MailingDelivery.RecipientKind.TEACHER in recipient_kinds
+    sends_to_organizers = MailingDelivery.RecipientKind.ORGANIZER in recipient_kinds
+    if sends_to_groups:
+        subject, cleaned_html, body_text = _validated_content(subject, body_html)
+    else:
+        subject = " ".join(str(subject or "").split())
+        cleaned_html = sanitize_rich_html(body_html)
+        body_text = rich_html_to_text(cleaned_html)
+    if sends_to_organizers:
+        if organizer_subject is None:
+            organizer_subject = subject
+        if organizer_body_html is None:
+            organizer_body_html = cleaned_html
+        organizer_subject, organizer_cleaned_html, organizer_body_text = (
+            _validated_content(organizer_subject, organizer_body_html)
+        )
+    else:
+        organizer_subject = " ".join(str(organizer_subject or "").split())
+        organizer_cleaned_html = sanitize_rich_html(organizer_body_html)
+        organizer_body_text = rich_html_to_text(organizer_cleaned_html)
     visit_date = _visit_date(visit_date)
     family_filter, family_label = _family_values(family)
     idempotency_key = str(idempotency_key or "").strip() or None
@@ -449,15 +487,17 @@ def create_mailing_campaign(
                 body_html=cleaned_html,
                 organizer_subject=organizer_subject,
                 organizer_body_html=organizer_cleaned_html,
+                audience=audience,
                 visit_date=visit_date,
                 family_filter=family_filter,
             ):
                 raise ValueError("Cette clé d’idempotence est déjà utilisée pour un autre envoi.")
             return existing
 
-    specs, preview = _recipient_specs(visit_date=visit_date, family=family)
-    if preview.total_count == 0:
-        raise ValueError("Aucun destinataire ne correspond aux filtres choisis.")
+    specs, _preview = _recipient_specs(visit_date=visit_date, family=family)
+    specs = [spec for spec in specs if spec.recipient_kind in recipient_kinds]
+    if not specs:
+        raise ValueError("Aucun destinataire du public choisi ne correspond aux filtres.")
 
     try:
         with transaction.atomic():
@@ -469,6 +509,7 @@ def create_mailing_campaign(
                 organizer_subject=organizer_subject,
                 organizer_body_html=organizer_cleaned_html,
                 organizer_body_text=organizer_body_text,
+                audience=audience,
                 visit_date=visit_date,
                 family_filter=family_filter,
                 family_label=family_label,
@@ -498,6 +539,7 @@ def create_mailing_campaign(
             body_html=cleaned_html,
             organizer_subject=organizer_subject,
             organizer_body_html=organizer_cleaned_html,
+            audience=audience,
             visit_date=visit_date,
             family_filter=family_filter,
         ):
@@ -759,14 +801,15 @@ def send_mailing_campaign(campaign_or_id, *, retry_failed=False):
 
 def create_and_send_mailing(
     *,
-    subject,
-    body_html,
+    subject=None,
+    body_html=None,
     organizer_subject=None,
     organizer_body_html=None,
     created_by=None,
     visit_date=None,
     family=None,
     idempotency_key=None,
+    recipient_kinds=None,
 ):
     """Freeze and synchronously send one campaign, idempotently when a key is supplied."""
     campaign = create_mailing_campaign(
@@ -778,5 +821,6 @@ def create_and_send_mailing(
         visit_date=visit_date,
         family=family,
         idempotency_key=idempotency_key,
+        recipient_kinds=recipient_kinds,
     )
     return send_mailing_campaign(campaign)
