@@ -1111,6 +1111,8 @@ class InternalRegistrationWorkflowTests(TestCase):
             "{{ nombre_inscrits }}",
         ):
             self.assertContains(response, template_variable)
+        self.assertContains(response, "Message aux responsables de groupe")
+        self.assertContains(response, "Message aux responsables d’animation")
 
         response = self.client.post(
             reverse("operations:mailing-create"),
@@ -1119,6 +1121,8 @@ class InternalRegistrationWorkflowTests(TestCase):
                 "family": str(self.family.pk),
                 "subject": "Préparer votre venue",
                 "body_html": "<p><strong>Accueil à 9 h.</strong></p><script>alert(1)</script>",
+                "organizer_subject": "Préparer l’accueil des groupes",
+                "organizer_body_html": "<p>Consignes réservées aux animateurs.</p>",
                 "idempotency_key": "test-final-mailing",
                 "action": "send",
             },
@@ -1131,6 +1135,7 @@ class InternalRegistrationWorkflowTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertNotIn("script", campaign.body_html)
+        self.assertEqual(campaign.organizer_subject, "Préparer l’accueil des groupes")
         self.assertEqual(campaign.deliveries.count(), 2)
         self.assertFalse(
             campaign.deliveries.exclude(status=MailingDelivery.Status.SENT).exists()
@@ -1139,6 +1144,29 @@ class InternalRegistrationWorkflowTests(TestCase):
             [message.to[0] for message in mail.outbox],
             ["camille@example.test", "animation@example.test"],
         )
+        group_message = next(
+            message for message in mail.outbox if message.to == ["camille@example.test"]
+        )
+        organizer_message = next(
+            message
+            for message in mail.outbox
+            if message.to == ["animation@example.test"]
+        )
+        self.assertEqual(group_message.subject, "Préparer votre venue")
+        self.assertEqual(organizer_message.subject, "Préparer l’accueil des groupes")
+        self.assertIn("Accueil à 9 h.", group_message.body)
+        self.assertNotIn("Consignes réservées aux animateurs", group_message.body)
+        self.assertIn("Consignes réservées aux animateurs", organizer_message.body)
+        self.assertNotIn("Accueil à 9 h.", organizer_message.body)
+
+        detail_response = self.client.get(
+            reverse("operations:mailing-detail", kwargs={"campaign_id": campaign.pk})
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertContains(detail_response, "Préparer votre venue")
+        self.assertContains(detail_response, "Préparer l’accueil des groupes")
+        self.assertContains(detail_response, "Responsables de groupe")
+        self.assertContains(detail_response, "Responsables d’animation")
 
     def test_final_mailing_requires_confirmation_for_missing_organizer_email(self):
         self.session.organizer_email = ""
@@ -1150,6 +1178,8 @@ class InternalRegistrationWorkflowTests(TestCase):
             "family": str(self.family.pk),
             "subject": "Préparer votre venue",
             "body_html": "<p>Accueil à 9 h.</p>",
+            "organizer_subject": "Préparer l’accueil des groupes",
+            "organizer_body_html": "<p>Consignes pour les animateurs.</p>",
             "idempotency_key": "mailing-adresse-manquante",
             "action": "send",
         }

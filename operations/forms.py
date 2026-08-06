@@ -536,9 +536,19 @@ class MailingForm(forms.Form):
     family = forms.ModelChoiceField(
         label="Famille", queryset=GroupFamily.objects.none(), required=False
     )
-    subject = forms.CharField(label="Objet", max_length=200)
+    subject = forms.CharField(label="Objet pour les responsables de groupe", max_length=255)
     body_html = forms.CharField(
-        label="Contenu enrichi", widget=forms.Textarea, max_length=50_000
+        label="Message aux responsables de groupe",
+        widget=forms.Textarea,
+        max_length=50_000,
+    )
+    organizer_subject = forms.CharField(
+        label="Objet pour les responsables d’animation", max_length=255
+    )
+    organizer_body_html = forms.CharField(
+        label="Message aux responsables d’animation",
+        widget=forms.Textarea,
+        max_length=50_000,
     )
     confirm_missing = forms.BooleanField(
         label="Je confirme l'envoi malgré les adresses manquantes.",

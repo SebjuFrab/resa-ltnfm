@@ -1260,10 +1260,17 @@ def registration_resend(request, reference):
 @require_http_methods(["GET", "POST"])
 def mailing_create(request):
     initial = {
-        "subject": "Informations pratiques — La Terre est Notre Métier",
+        "subject": "Informations pratiques pour votre groupe — La Terre est Notre Métier",
         "body_html": (
-            "<p>Vous trouverez ci-dessous les informations générales "
-            "utiles pour préparer votre venue au salon.</p>"
+            "<p>Vous trouverez ci-dessous le programme et les informations "
+            "utiles pour préparer la venue de votre groupe au salon.</p>"
+        ),
+        "organizer_subject": (
+            "Organisation de votre animation — La Terre est Notre Métier"
+        ),
+        "organizer_body_html": (
+            "<p>Vous trouverez ci-dessous les horaires, les effectifs et les "
+            "coordonnées des groupes attendus sur vos animations.</p>"
         ),
     }
     form = MailingForm(request.POST or None, initial=initial)
@@ -1290,6 +1297,8 @@ def mailing_create(request):
                     result = create_and_send_mailing(
                         subject=data["subject"],
                         body_html=data["body_html"],
+                        organizer_subject=data["organizer_subject"],
+                        organizer_body_html=data["organizer_body_html"],
                         created_by=request.user,
                         visit_date=data["visit_date"],
                         family=data["family"],
@@ -1317,6 +1326,11 @@ def mailing_create(request):
         if request.method == "POST"
         else initial["body_html"]
     )
+    organizer_source_html = (
+        request.POST.get("organizer_body_html", "")
+        if request.method == "POST"
+        else initial["organizer_body_html"]
+    )
     return render(
         request,
         "operations/mailing_form.html",
@@ -1324,6 +1338,7 @@ def mailing_create(request):
             "form": form,
             "preview": preview,
             "editor_html": sanitize_rich_html(source_html),
+            "organizer_editor_html": sanitize_rich_html(organizer_source_html),
             "mailing_template_variables": MAILING_TEMPLATE_VARIABLES,
             "idempotency_key": request.POST.get("idempotency_key")
             or uuid.uuid4().hex,
@@ -1340,12 +1355,24 @@ def mailing_detail(request, campaign_id):
     deliveries = campaign.deliveries.order_by(
         "recipient_kind", "recipient", "pk"
     )
+    group_deliveries = deliveries.filter(
+        recipient_kind=MailingDelivery.RecipientKind.TEACHER
+    )
+    organizer_deliveries = deliveries.filter(
+        recipient_kind=MailingDelivery.RecipientKind.ORGANIZER
+    )
     return render(
         request,
         "operations/mailing_detail.html",
         {
             "campaign": campaign,
             "deliveries": deliveries,
+            "group_sent_count": group_deliveries.filter(
+                status=MailingDelivery.Status.SENT
+            ).count(),
+            "organizer_sent_count": organizer_deliveries.filter(
+                status=MailingDelivery.Status.SENT
+            ).count(),
             "sent_count": deliveries.filter(
                 status=MailingDelivery.Status.SENT
             ).count(),

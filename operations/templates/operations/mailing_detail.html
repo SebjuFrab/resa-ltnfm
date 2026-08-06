@@ -4,11 +4,23 @@
 
 {% block content %}
   <p class="eyebrow">Publipostage envoyé</p>
-  <h1>{{ campaign.subject }}</h1>
+  <h1>Publipostages de préparation</h1>
   <p>Créé le {{ campaign.created_at|date:"d/m/Y à H:i" }}{% if campaign.created_by %} par {{ campaign.created_by }}{% endif %}.</p>
-  <div class="mail-preview">{{ campaign.body_html|safe }}</div>
+  <div class="cards form-grid form-grid-2">
+    <article class="card">
+      <p class="eyebrow">Responsables de groupe</p>
+      <h2>{{ campaign.subject }}</h2>
+      <div class="mail-preview">{{ campaign.body_html|safe }}</div>
+    </article>
+    <article class="card">
+      <p class="eyebrow">Responsables d’animation</p>
+      <h2>{{ campaign.organizer_subject|default:campaign.subject }}</h2>
+      <div class="mail-preview">{{ campaign.organizer_body_html|default:campaign.body_html|safe }}</div>
+    </article>
+  </div>
   <div class="cards metric-grid">
-    <article class="card"><h2>Envoyés</h2><p class="metric">{{ sent_count }}</p></article>
+    <article class="card"><h2>Groupes contactés</h2><p class="metric">{{ group_sent_count }}</p></article>
+    <article class="card"><h2>Animations contactées</h2><p class="metric">{{ organizer_sent_count }}</p></article>
     <article class="card"><h2>Échecs</h2><p class="metric">{{ failed_count }}</p></article>
   </div>
   <h2>Détail des destinataires</h2>

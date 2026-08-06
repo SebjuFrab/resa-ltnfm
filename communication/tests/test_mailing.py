@@ -217,12 +217,17 @@ class MailingTests(TestCase):
         campaign = create_mailing_campaign(
             subject=" Informations finales ",
             body_html="<h2>Bienvenue</h2><p>Rendez-vous <em>à 9 h</em>.</p>",
+            organizer_subject=" Consignes pour les animations ",
+            organizer_body_html=(
+                "<p>Préparez l’accueil des <strong>groupes attendus</strong>.</p>"
+            ),
             created_by=self.user,
             visit_date=date(2026, 9, 23),
             family=self.family,
         )
 
         self.assertEqual(campaign.subject, "Informations finales")
+        self.assertEqual(campaign.organizer_subject, "Consignes pour les animations")
         self.assertEqual(campaign.family_filter, str(self.family.pk))
         self.assertEqual(campaign.family_label, "Lycées")
         self.assertEqual(campaign.deliveries.count(), 2)
@@ -234,15 +239,22 @@ class MailingTests(TestCase):
             teacher.context_snapshot["registration"]["total_count"], 26
         )
         self.assertIn("Bienvenue", campaign.body_text)
+        self.assertIn("groupes attendus", campaign.organizer_body_text)
 
     def test_send_is_individual_personalized_and_idempotent(self):
         personalized_body = (
             "<p>Variables : {{ prenom }}|{{ nom }}|{{ nombre_inscrits }}</p>"
             "<p>Programme variable : {{ programme }}</p>"
         )
+        organizer_body = (
+            "<p>Message animation : {{ nom }}|{{ nombre_inscrits }}</p>"
+            "<p>Planning animation : {{ programme }}</p>"
+        )
         first = create_and_send_mailing(
-            subject="Dernières informations",
+            subject="Dernières informations pour votre groupe",
             body_html=personalized_body,
+            organizer_subject="Consignes pour votre animation",
+            organizer_body_html=organizer_body,
             created_by=self.user,
             idempotency_key="mailing-final-2026",
         )
@@ -262,11 +274,18 @@ class MailingTests(TestCase):
         )
         self._assert_branded_message(teacher_message)
         self._assert_branded_message(organizer_message)
+        self.assertEqual(
+            teacher_message.subject, "Dernières informations pour votre groupe"
+        )
+        self.assertEqual(
+            organizer_message.subject, "Consignes pour votre animation"
+        )
         self.assertIn(self.first_registration.group_code, teacher_message.body)
         self.assertIn("Effectif total : 26", teacher_message.body)
         self.assertIn("Email de contact : prof-a@example.test", teacher_message.body)
         self.assertIn("Organisation du salon : contact@example.test", teacher_message.body)
         self.assertIn("Variables : Prénom a|Nom a|26", teacher_message.body)
+        self.assertNotIn("Message animation", teacher_message.body)
         self.assertIn(
             "23/09/2026 · 10:00–10:45 · Le sol vivant — Pôle sols",
             teacher_message.body,
@@ -282,18 +301,30 @@ class MailingTests(TestCase):
             organizer_message.body,
         )
         self.assertIn(
-            "Variables : |Équipe graines, Équipe sols|47",
+            "Message animation : Équipe graines, Équipe sols|47",
             organizer_message.body,
         )
+        self.assertNotIn("Variables : Prénom", organizer_message.body)
         self.assertIn(
             "24/09/2026 · 11:00–11:30 · Les graines — Pôle graines",
             organizer_message.body,
         )
         self.assertNotIn("{{ prenom }}", teacher_message.body)
+        teacher_html = teacher_message.alternatives[0].content
+        self.assertLess(
+            teacher_html.index("Votre programme"),
+            teacher_html.index("Récapitulatif de votre groupe"),
+        )
+        self.assertLess(
+            teacher_message.body.index("Programme :"),
+            teacher_message.body.index("Récapitulatif de votre groupe"),
+        )
 
         second = create_and_send_mailing(
-            subject="Dernières informations",
+            subject="Dernières informations pour votre groupe",
             body_html=personalized_body,
+            organizer_subject="Consignes pour votre animation",
+            organizer_body_html=organizer_body,
             created_by=self.user,
             idempotency_key="mailing-final-2026",
         )

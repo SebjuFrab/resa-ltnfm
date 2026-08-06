@@ -1,11 +1,11 @@
 {% extends "emails/base.html" %}
 
-{% block title %}{{ campaign.subject }}{% endblock %}
+{% block title %}{{ message_subject }}{% endblock %}
 {% block preheader %}Récapitulatif des groupes attendus sur vos animations.{% endblock %}
 
 {% block content %}
   <p style="margin:0 0 8px;color:#6b5100;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Informations aux responsables d’animation</p>
-  <h1 style="margin:0 0 22px;color:#2f3032;font-size:27px;line-height:1.15;">{{ campaign.subject }}</h1>
+  <h1 style="margin:0 0 22px;color:#2f3032;font-size:27px;line-height:1.15;">{{ message_subject }}</h1>
   <p style="margin:0 0 14px;font-size:16px;line-height:1.6;">Bonjour{% if delivery.recipient_name %} <strong>{{ delivery.recipient_name }}</strong>{% endif %},</p>
   <div style="margin:0 0 20px;padding:16px 18px;background:#eaf8f4;color:#155341;font-size:15px;line-height:1.6;border-left:5px solid #14ad88;border-radius:7px;">{{ personalized_body_html|safe }}</div>
   <p style="margin:0 0 24px;color:#55575a;font-size:13px;"><strong>Email de contact :</strong> <a href="mailto:{{ delivery.recipient }}" style="color:#087f68;">{{ delivery.recipient }}</a></p>

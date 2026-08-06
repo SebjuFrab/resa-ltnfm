@@ -1,31 +1,15 @@
 {% extends "emails/base.html" %}
 
-{% block title %}{{ campaign.subject }}{% endblock %}
-{% block preheader %}Informations pour votre venue à La Terre est Notre Métier.{% endblock %}
+{% block title %}{{ message_subject }}{% endblock %}
+{% block preheader %}Informations destinées au responsable de votre groupe.{% endblock %}
 
 {% block content %}
-  <p style="margin:0 0 8px;color:#6b5100;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Informations aux groupes</p>
-  <h1 style="margin:0 0 22px;color:#2f3032;font-size:27px;line-height:1.15;">{{ campaign.subject }}</h1>
+  <p style="margin:0 0 8px;color:#6b5100;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Informations aux responsables de groupe</p>
+  <h1 style="margin:0 0 22px;color:#2f3032;font-size:27px;line-height:1.15;">{{ message_subject }}</h1>
   <p style="margin:0 0 14px;font-size:16px;line-height:1.6;">Bonjour <strong>{{ snapshot.registration.teacher_first_name }} {{ snapshot.registration.teacher_last_name }}</strong>,</p>
   <div style="margin:0 0 24px;padding:16px 18px;background:#eaf8f4;color:#155341;font-size:15px;line-height:1.6;border-left:5px solid #14ad88;border-radius:7px;">{{ personalized_body_html|safe }}</div>
 
-  <h2 style="margin:0 0 12px;font-size:22px;">Récapitulatif de votre groupe</h2>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fff7d6;border-left:5px solid #f3b709;border-radius:8px;">
-    <tr>
-      <td style="padding:18px 20px;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-          <tr><td class="summary-label" width="34%" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Code du groupe</td><td style="padding:0 0 10px;font-size:17px;font-weight:900;">{{ snapshot.registration.group_code }}</td></tr>
-          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Établissement</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ snapshot.registration.institution }}</td></tr>
-          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Jour de visite</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ snapshot.registration.visit_date_label }}</td></tr>
-          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Niveau</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ snapshot.registration.school_level }}</td></tr>
-          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Participants</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ snapshot.registration.total_count }} personnes — {{ snapshot.registration.student_count }} élèves et {{ snapshot.registration.chaperone_count }} accompagnateurs</td></tr>
-          <tr><td class="summary-label" style="padding:0 12px 0 0;color:#6d6e70;font-size:13px;">Email de contact</td><td style="font-size:14px;font-weight:700;"><a href="mailto:{{ snapshot.registration.teacher_email }}" style="color:#087f68;">{{ snapshot.registration.teacher_email }}</a></td></tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-
-  <h2 style="margin:26px 0 4px;font-size:22px;">Votre programme</h2>
+  <h2 style="margin:0 0 4px;font-size:22px;">Votre programme</h2>
   <div style="width:56px;height:5px;margin:0 0 12px;background:#f3b709;border-radius:3px;"></div>
   {% for reservation in snapshot.registration.reservations %}
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 12px;border:1px solid #deddd7;border-top:4px solid #14ad88;border-radius:8px;">
@@ -40,4 +24,20 @@
   {% empty %}
     <p style="color:#55575a;">Aucune animation réservée.</p>
   {% endfor %}
+
+  <h2 style="margin:26px 0 12px;font-size:22px;">Récapitulatif de votre groupe</h2>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fff7d6;border-left:5px solid #f3b709;border-radius:8px;">
+    <tr>
+      <td style="padding:18px 20px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr><td class="summary-label" width="34%" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Code du groupe</td><td style="padding:0 0 10px;font-size:17px;font-weight:900;">{{ snapshot.registration.group_code }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Établissement</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ snapshot.registration.institution }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Jour de visite</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ snapshot.registration.visit_date_label }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Niveau</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ snapshot.registration.school_level }}</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 10px 0;color:#6d6e70;font-size:13px;">Participants</td><td style="padding:0 0 10px;font-size:14px;font-weight:700;">{{ snapshot.registration.total_count }} personnes — {{ snapshot.registration.student_count }} élèves et {{ snapshot.registration.chaperone_count }} accompagnateurs</td></tr>
+          <tr><td class="summary-label" style="padding:0 12px 0 0;color:#6d6e70;font-size:13px;">Email de contact</td><td style="font-size:14px;font-weight:700;"><a href="mailto:{{ snapshot.registration.teacher_email }}" style="color:#087f68;">{{ snapshot.registration.teacher_email }}</a></td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 {% endblock %}

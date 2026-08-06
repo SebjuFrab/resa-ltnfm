@@ -393,11 +393,20 @@ def _validated_content(subject, body_html):
 
 
 def _same_idempotent_request(
-    campaign, *, subject, body_html, visit_date, family_filter
+    campaign,
+    *,
+    subject,
+    body_html,
+    organizer_subject,
+    organizer_body_html,
+    visit_date,
+    family_filter,
 ):
     return (
         campaign.subject == subject
         and campaign.body_html == body_html
+        and campaign.organizer_subject == organizer_subject
+        and campaign.organizer_body_html == organizer_body_html
         and campaign.visit_date == visit_date
         and campaign.family_filter == family_filter
     )
@@ -407,6 +416,8 @@ def create_mailing_campaign(
     *,
     subject,
     body_html,
+    organizer_subject=None,
+    organizer_body_html=None,
     created_by=None,
     visit_date=None,
     family=None,
@@ -414,6 +425,13 @@ def create_mailing_campaign(
 ):
     """Freeze recipients and personalized context without sending messages."""
     subject, cleaned_html, body_text = _validated_content(subject, body_html)
+    if organizer_subject is None:
+        organizer_subject = subject
+    if organizer_body_html is None:
+        organizer_body_html = cleaned_html
+    organizer_subject, organizer_cleaned_html, organizer_body_text = (
+        _validated_content(organizer_subject, organizer_body_html)
+    )
     visit_date = _visit_date(visit_date)
     family_filter, family_label = _family_values(family)
     idempotency_key = str(idempotency_key or "").strip() or None
@@ -429,6 +447,8 @@ def create_mailing_campaign(
                 existing,
                 subject=subject,
                 body_html=cleaned_html,
+                organizer_subject=organizer_subject,
+                organizer_body_html=organizer_cleaned_html,
                 visit_date=visit_date,
                 family_filter=family_filter,
             ):
@@ -446,6 +466,9 @@ def create_mailing_campaign(
                 subject=subject,
                 body_html=cleaned_html,
                 body_text=body_text,
+                organizer_subject=organizer_subject,
+                organizer_body_html=organizer_cleaned_html,
+                organizer_body_text=organizer_body_text,
                 visit_date=visit_date,
                 family_filter=family_filter,
                 family_label=family_label,
@@ -473,6 +496,8 @@ def create_mailing_campaign(
             campaign,
             subject=subject,
             body_html=cleaned_html,
+            organizer_subject=organizer_subject,
+            organizer_body_html=organizer_cleaned_html,
             visit_date=visit_date,
             family_filter=family_filter,
         ):
@@ -551,16 +576,27 @@ def _personalize_content(value, values, *, html=False):
 
 def _render_delivery(delivery):
     values = _template_values(delivery)
+    if delivery.recipient_kind == MailingDelivery.RecipientKind.ORGANIZER:
+        message_subject = delivery.campaign.organizer_subject or delivery.campaign.subject
+        message_body_html = (
+            delivery.campaign.organizer_body_html or delivery.campaign.body_html
+        )
+        message_body_text = (
+            delivery.campaign.organizer_body_text or delivery.campaign.body_text
+        )
+    else:
+        message_subject = delivery.campaign.subject
+        message_body_html = delivery.campaign.body_html
+        message_body_text = delivery.campaign.body_text
     context = {
         "campaign": delivery.campaign,
         "delivery": delivery,
         "snapshot": delivery.context_snapshot,
+        "message_subject": message_subject,
         "personalized_body_html": _personalize_content(
-            delivery.campaign.body_html, values, html=True
+            message_body_html, values, html=True
         ),
-        "personalized_body_text": _personalize_content(
-            delivery.campaign.body_text, values
-        ),
+        "personalized_body_text": _personalize_content(message_body_text, values),
         "organization_email": settings.ORGANIZATION_EMAIL,
         "organization_phone": settings.ORGANIZATION_PHONE,
     }
@@ -570,6 +606,7 @@ def _render_delivery(delivery):
         else "mailing_organizer"
     )
     return (
+        message_subject,
         render_to_string(f"emails/{template}.txt", context),
         render_to_string(f"emails/{template}.html", context),
     )
@@ -609,9 +646,9 @@ def send_mailing_delivery(delivery_or_id, *, retry_failed=False):
         )
 
     try:
-        text_body, html_body = _render_delivery(delivery)
+        subject, text_body, html_body = _render_delivery(delivery)
         message = EmailMultiAlternatives(
-            subject=delivery.campaign.subject,
+            subject=subject,
             body=text_body,
             to=[delivery.recipient],
         )
@@ -724,6 +761,8 @@ def create_and_send_mailing(
     *,
     subject,
     body_html,
+    organizer_subject=None,
+    organizer_body_html=None,
     created_by=None,
     visit_date=None,
     family=None,
@@ -733,6 +772,8 @@ def create_and_send_mailing(
     campaign = create_mailing_campaign(
         subject=subject,
         body_html=body_html,
+        organizer_subject=organizer_subject,
+        organizer_body_html=organizer_body_html,
         created_by=created_by,
         visit_date=visit_date,
         family=family,

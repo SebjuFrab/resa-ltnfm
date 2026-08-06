@@ -98,13 +98,22 @@ class MailingCampaignAdmin(admin.ModelAdmin):
         "created_by",
     )
     list_filter = ("status", "visit_date", "created_at")
-    search_fields = ("reference", "subject", "family_label", "deliveries__recipient")
+    search_fields = (
+        "reference",
+        "subject",
+        "organizer_subject",
+        "family_label",
+        "deliveries__recipient",
+    )
     readonly_fields = (
         "reference",
         "idempotency_key",
         "subject",
         "body_html",
         "body_text",
+        "organizer_subject",
+        "organizer_body_html",
+        "organizer_body_text",
         "visit_date",
         "family_filter",
         "family_label",

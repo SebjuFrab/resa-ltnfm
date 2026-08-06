@@ -58,9 +58,18 @@ class MailingCampaign(models.Model):
     idempotency_key = models.CharField(
         "clé d’idempotence", max_length=100, unique=True, null=True, blank=True
     )
-    subject = models.CharField("objet", max_length=255)
-    body_html = models.TextField("contenu enrichi nettoyé")
-    body_text = models.TextField("contenu texte")
+    subject = models.CharField("objet pour les responsables de groupe", max_length=255)
+    body_html = models.TextField("contenu enrichi pour les responsables de groupe")
+    body_text = models.TextField("contenu texte pour les responsables de groupe")
+    organizer_subject = models.CharField(
+        "objet pour les responsables d’animation", max_length=255, blank=True
+    )
+    organizer_body_html = models.TextField(
+        "contenu enrichi pour les responsables d’animation", blank=True
+    )
+    organizer_body_text = models.TextField(
+        "contenu texte pour les responsables d’animation", blank=True
+    )
     visit_date = models.DateField("jour filtré", null=True, blank=True, db_index=True)
     family_filter = models.CharField(
         "identifiant de famille filtrée", max_length=100, blank=True
@@ -101,7 +110,7 @@ class MailingCampaign(models.Model):
 
 class MailingDelivery(models.Model):
     class RecipientKind(models.TextChoices):
-        TEACHER = "TEACHER", "Professeur"
+        TEACHER = "TEACHER", "Responsable de groupe"
         ORGANIZER = "ORGANIZER", "Responsable d’animation"
 
     class Status(models.TextChoices):
