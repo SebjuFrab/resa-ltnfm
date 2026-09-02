@@ -15,17 +15,11 @@ from catalogue.models import Animation, Session, Theme
 
 MAX_ROWS = 500
 MAX_GENERATED_SESSIONS = 2_000
-
-REQUIRED_COLUMNS = (
-    "titre_animation",
-    "categorie",
-    "thematiques",
-    "lieu_de_rendez_vous",
-    "duree",
-    "jauge",
-    "jour",
-    "horaires",
-)
+DEFAULT_DURATION_MINUTES = 60
+DEFAULT_MAX_CAPACITY = 30
+DEFAULT_START_TIME = "09:00"
+DEFAULT_LOCATION = "À compléter"
+REQUIRED_COLUMNS = ()
 
 COLUMN_ALIASES = {
     "titre_animation": {
@@ -230,7 +224,7 @@ def _active_theme_lookup():
 def _parse_themes(value, theme_lookup, ambiguous_theme_tokens):
     raw_value = str(value or "").strip()
     if not raw_value:
-        raise ValueError("au moins une thématique est obligatoire")
+        return ()
 
     raw_tokens = [part.strip() for part in raw_value.split("|")]
     if any(not token for token in raw_tokens):
@@ -247,9 +241,7 @@ def _parse_themes(value, theme_lookup, ambiguous_theme_tokens):
             raise ValueError(f"la thématique « {raw_token} » est ambiguë")
         theme = theme_lookup.get(token)
         if theme is None:
-            raise ValueError(
-                f"la thématique « {raw_token} » est inconnue ou inactive"
-            )
+            raise ValueError(f"la thématique « {raw_token} » est inconnue ou inactive")
         if theme.pk in seen_ids:
             raise ValueError(f"la thématique « {raw_token} » est dupliquée")
         seen_ids.add(theme.pk)
@@ -279,10 +271,12 @@ def _event_dates():
 
 def _parse_day(value):
     raw_value = str(value or "").strip()
-    if not raw_value:
-        raise ValueError("le jour est obligatoire")
-
     configured_dates = _event_dates()
+    if not raw_value:
+        if not configured_dates:
+            raise ValueError("aucun jour du salon n'est configuré")
+        return configured_dates[0]
+
     try:
         parsed_date = _parse_date(raw_value)
     except ValueError:
@@ -360,9 +354,9 @@ def _parse_duration(value):
     raise ValueError("durée attendue en minutes ou au format 1h/1h30")
 
 
-def _validate_text(value, *, label, max_length):
+def _validate_text(value, *, label, max_length, required=True):
     cleaned_value = str(value or "").strip()
-    if not cleaned_value:
+    if required and not cleaned_value:
         raise ValueError(f"{label} est obligatoire")
     if len(cleaned_value) > max_length:
         raise ValueError(f"{label} ne doit pas dépasser {max_length} caractères")
@@ -384,9 +378,7 @@ def _validate_optional_contact(mapping):
 
 def _find_animation(title):
     animations = list(
-        Animation.objects.filter(title__iexact=title)
-        .prefetch_related("themes")
-        .distinct()[:2]
+        Animation.objects.filter(title__iexact=title).prefetch_related("themes").distinct()[:2]
     )
     if len(animations) > 1:
         raise ValueError(f"animation ambiguë : {title}")
@@ -395,39 +387,72 @@ def _find_animation(title):
 
 def _rows_from_mapping(mapping, line, theme_lookup, ambiguous_theme_tokens):
     title = _validate_text(
-        mapping["titre_animation"], label="le titre de l'animation", max_length=200
+        mapping["titre_animation"],
+        label="le titre de l'animation",
+        max_length=200,
+        required=False,
     )
-    venue_category, venue_category_label = _parse_venue_category(mapping["categorie"])
-    themes = _parse_themes(
-        mapping["thematiques"],
-        theme_lookup,
-        ambiguous_theme_tokens,
-    )
+    title = title or f"Animation à compléter — ligne {line}"
+    animation = _find_animation(title)
+
+    if str(mapping["categorie"] or "").strip():
+        venue_category, venue_category_label = _parse_venue_category(mapping["categorie"])
+    else:
+        venue_category = (
+            animation.venue_category
+            if animation and animation.venue_category
+            else Animation.VenueCategory.INDOOR
+        )
+        venue_category_label = Animation.VenueCategory(venue_category).label
+
+    if str(mapping["thematiques"] or "").strip():
+        themes = _parse_themes(
+            mapping["thematiques"],
+            theme_lookup,
+            ambiguous_theme_tokens,
+        )
+    elif animation:
+        themes = tuple(
+            sorted(
+                animation.themes.all(),
+                key=lambda theme: (theme.sort_order, theme.name, theme.pk),
+            )
+        )
+    else:
+        themes = ()
+
     location = _validate_text(
         mapping["lieu_de_rendez_vous"],
         label="le lieu de rendez-vous",
         max_length=200,
+        required=False,
     )
-    duration_minutes = _parse_duration(mapping["duree"])
-    max_capacity = _parse_positive_integer(mapping["jauge"], "la jauge")
+    location = location or DEFAULT_LOCATION
+    duration_minutes = (
+        _parse_duration(mapping["duree"])
+        if str(mapping["duree"] or "").strip()
+        else (animation.indicative_duration if animation else DEFAULT_DURATION_MINUTES)
+    )
+    max_capacity = (
+        _parse_positive_integer(mapping["jauge"], "la jauge")
+        if str(mapping["jauge"] or "").strip()
+        else DEFAULT_MAX_CAPACITY
+    )
     session_date = _parse_day(mapping["jour"])
     organizer, organizer_email = _validate_optional_contact(mapping)
 
-    animation = _find_animation(title)
     if animation and animation.indicative_duration != duration_minutes:
         raise ValueError(
             f"la durée ne correspond pas aux {animation.indicative_duration} minutes "
             "de l'animation existante"
         )
     original_theme_ids = (
-        tuple(sorted(theme.pk for theme in animation.themes.all()))
-        if animation
-        else ()
+        tuple(sorted(theme.pk for theme in animation.themes.all())) if animation else ()
     )
 
     raw_times = str(mapping["horaires"] or "").strip()
     if not raw_times:
-        raise ValueError("au moins un horaire est obligatoire")
+        raw_times = DEFAULT_START_TIME
     time_values = [part.strip() for part in raw_times.split(",")]
     if any(not value for value in time_values):
         raise ValueError("la liste des horaires contient une valeur vide")
@@ -452,9 +477,7 @@ def _rows_from_mapping(mapping, line, theme_lookup, ambiguous_theme_tokens):
                 theme_ids=tuple(theme.pk for theme in themes),
                 theme_names=tuple(theme.name for theme in themes),
                 theme_slugs=tuple(theme.slug for theme in themes),
-                original_venue_category=(
-                    animation.venue_category if animation else None
-                ),
+                original_venue_category=(animation.venue_category if animation else None),
                 original_theme_ids=original_theme_ids,
                 duration_minutes=duration_minutes,
                 date=session_date,
@@ -494,9 +517,7 @@ def _csv_reader(content):
     header_line = content.splitlines()[0]
     semicolon_count = header_line.count(";")
     comma_count = header_line.count(",")
-    if not semicolon_count and not comma_count:
-        raise ValueError("Le séparateur du fichier doit être un point-virgule ou une virgule.")
-    delimiter = ";" if semicolon_count >= comma_count else ","
+    delimiter = ";" if semicolon_count >= comma_count and semicolon_count else ","
     return csv.DictReader(StringIO(content), delimiter=delimiter)
 
 
@@ -506,25 +527,18 @@ def _header_mapping(fieldnames):
     for raw_header in fieldnames or ():
         normalized_header = _normalize_header(raw_header)
         canonical = next(
-            (
-                column
-                for column, aliases in COLUMN_ALIASES.items()
-                if normalized_header in aliases
-            ),
+            (column for column, aliases in COLUMN_ALIASES.items() if normalized_header in aliases),
             None,
         )
         if canonical is None:
             continue
         if canonical in used_columns:
-            raise ValueError(
-                f"Colonnes en double : {used_columns[canonical]} et {raw_header}."
-            )
+            raise ValueError(f"Colonnes en double : {used_columns[canonical]} et {raw_header}.")
         used_columns[canonical] = str(raw_header)
         canonical_by_header[raw_header] = canonical
 
-    missing = [column for column in REQUIRED_COLUMNS if column not in used_columns]
-    if missing:
-        raise ValueError(f"Colonnes manquantes : {', '.join(missing)}.")
+    if not canonical_by_header:
+        raise ValueError("Aucune colonne reconnue. Utilisez au moins un intitulé du modèle CSV.")
     return canonical_by_header
 
 
@@ -575,10 +589,13 @@ def preview_session_csv(upload):
             )
             continue
 
-        row = {
-            canonical: str(raw_row.get(raw_header, "") or "")
-            for raw_header, canonical in header_mapping.items()
-        }
+        row = {column: "" for column in COLUMN_ALIASES}
+        row.update(
+            {
+                canonical: str(raw_row.get(raw_header, "") or "")
+                for raw_header, canonical in header_mapping.items()
+            }
+        )
         if not any(value.strip() for value in row.values()):
             continue
         source_row_count += 1
@@ -607,8 +624,7 @@ def preview_session_csv(upload):
             )
             if previous_signature != animation_signature:
                 raise ValueError(
-                    "une même animation possède des informations différentes "
-                    "dans le fichier"
+                    "une même animation possède des informations différentes dans le fichier"
                 )
         except (KeyError, ValueError) as error:
             preview.issues.append(ImportIssue(index, str(error)))
@@ -631,8 +647,7 @@ def preview_session_csv(upload):
                 preview.issues.append(
                     ImportIssue(
                         None,
-                        "Le fichier génère plus de "
-                        f"{MAX_GENERATED_SESSIONS} séances.",
+                        f"Le fichier génère plus de {MAX_GENERATED_SESSIONS} séances.",
                     )
                 )
                 break
@@ -677,26 +692,19 @@ def _payload_row(payload):
             for values in (raw_theme_ids, raw_theme_names, raw_theme_slugs)
         ):
             raise ValueError("les thématiques de l'aperçu ne sont plus valides")
-        if not raw_theme_ids or not (
-            len(raw_theme_ids) == len(raw_theme_names) == len(raw_theme_slugs)
-        ):
+        if not (len(raw_theme_ids) == len(raw_theme_names) == len(raw_theme_slugs)):
             raise ValueError("les thématiques de l'aperçu ne sont plus valides")
         theme_ids = tuple(
-            _parse_positive_integer(value, "l'identifiant de thématique")
-            for value in raw_theme_ids
+            _parse_positive_integer(value, "l'identifiant de thématique") for value in raw_theme_ids
         )
         theme_names = tuple(
             _validate_text(value, label="la thématique", max_length=100)
             for value in raw_theme_names
         )
         theme_slugs = tuple(
-            _validate_text(value, label="la thématique", max_length=50)
-            for value in raw_theme_slugs
+            _validate_text(value, label="la thématique", max_length=50) for value in raw_theme_slugs
         )
-        if (
-            len(set(theme_ids)) != len(theme_ids)
-            or len(set(theme_slugs)) != len(theme_slugs)
-        ):
+        if len(set(theme_ids)) != len(theme_ids) or len(set(theme_slugs)) != len(theme_slugs):
             raise ValueError("une thématique est dupliquée dans l'aperçu")
 
         original_venue_category = payload["original_venue_category"]
@@ -717,14 +725,10 @@ def _payload_row(payload):
         )
         if len(set(original_theme_ids)) != len(original_theme_ids):
             raise ValueError("une thématique d'origine est dupliquée dans l'aperçu")
-        if animation_id is None and (
-            original_venue_category is not None or original_theme_ids
-        ):
+        if animation_id is None and (original_venue_category is not None or original_theme_ids):
             raise ValueError("les données d'origine de l'animation sont incohérentes")
 
-        duration_minutes = _parse_positive_integer(
-            payload["duration_minutes"], "la durée"
-        )
+        duration_minutes = _parse_positive_integer(payload["duration_minutes"], "la durée")
         session_date = date.fromisoformat(str(payload["date"]))
         starts_at = time.fromisoformat(str(payload["starts_at"]))
         ends_at = time.fromisoformat(str(payload["ends_at"]))
@@ -740,9 +744,7 @@ def _payload_row(payload):
         raise ValueError("la date ne correspond pas à un jour du salon")
     if ends_at <= starts_at:
         raise ValueError("l'heure de fin doit être postérieure à l'heure de début")
-    expected_end = datetime.combine(session_date, starts_at) + timedelta(
-        minutes=duration_minutes
-    )
+    expected_end = datetime.combine(session_date, starts_at) + timedelta(minutes=duration_minutes)
     if expected_end.date() != session_date or expected_end.time() != ends_at:
         raise ValueError("la durée et l'heure de fin de l'aperçu sont incohérentes")
     if payload.get("status") != Session.Status.OPEN:
@@ -808,12 +810,9 @@ def _animation_signature(import_row):
 
 
 def _locked_import_themes(import_rows, issues):
-    expected_ids = {
-        theme_id for import_row in import_rows for theme_id in import_row.theme_ids
-    }
+    expected_ids = {theme_id for import_row in import_rows for theme_id in import_row.theme_ids}
     themes_by_id = {
-        theme.pk: theme
-        for theme in Theme.objects.select_for_update().filter(pk__in=expected_ids)
+        theme.pk: theme for theme in Theme.objects.select_for_update().filter(pk__in=expected_ids)
     }
     for import_row in import_rows:
         for theme_id, theme_name, theme_slug in zip(
@@ -841,19 +840,16 @@ def _locked_import_themes(import_rows, issues):
 
 def _animation_unchanged_since_preview(animation, reference):
     return (
-        animation.title.strip().casefold()
-        == reference.animation_title.strip().casefold()
+        animation.title.strip().casefold() == reference.animation_title.strip().casefold()
         and animation.indicative_duration == reference.duration_minutes
         and animation.venue_category == reference.original_venue_category
-        and {theme.pk for theme in animation.themes.all()}
-        == set(reference.original_theme_ids)
+        and {theme.pk for theme in animation.themes.all()} == set(reference.original_theme_ids)
     )
 
 
 def _animation_matches_import(animation, reference):
     return (
-        animation.title.strip().casefold()
-        == reference.animation_title.strip().casefold()
+        animation.title.strip().casefold() == reference.animation_title.strip().casefold()
         and animation.indicative_duration == reference.duration_minutes
         and animation.venue_category == reference.venue_category
         and {theme.pk for theme in animation.themes.all()} == set(reference.theme_ids)
@@ -904,10 +900,7 @@ def _resolve_animations(import_rows, issues):
                 with transaction.atomic():
                     animation.save(update_fields=("venue_category", "updated_at"))
                     animation.themes.set(
-                        [
-                            themes_by_id[theme_id]
-                            for theme_id in reference.theme_ids
-                        ]
+                        [themes_by_id[theme_id] for theme_id in reference.theme_ids]
                     )
             except (IntegrityError, ValidationError) as error:
                 issues.append(ImportIssue(reference.line, str(error)))
@@ -930,8 +923,7 @@ def _resolve_animations(import_rows, issues):
                 issues.append(
                     ImportIssue(
                         reference.line,
-                        "une animation du même titre existe maintenant avec "
-                        "d'autres informations",
+                        "une animation du même titre existe maintenant avec d'autres informations",
                     )
                 )
             else:
@@ -954,9 +946,7 @@ def _resolve_animations(import_rows, issues):
             animation.full_clean()
             with transaction.atomic():
                 animation.save()
-                animation.themes.set(
-                    [themes_by_id[theme_id] for theme_id in reference.theme_ids]
-                )
+                animation.themes.set([themes_by_id[theme_id] for theme_id in reference.theme_ids])
         except (IntegrityError, ValidationError) as error:
             issues.append(ImportIssue(reference.line, str(error)))
         else:

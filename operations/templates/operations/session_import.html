@@ -60,14 +60,14 @@
       <h2 id="import-taxonomy-title">Catégorie et thématiques à importer</h2>
       <div class="cards import-reference-grid">
         <article class="card import-reference-card">
-          <p class="card-kicker">Colonne obligatoire</p>
+          <p class="card-kicker">Colonne facultative</p>
           <h3 class="card-title"><code>categorie</code></h3>
           <p><strong>Valeurs acceptées :</strong>
             {% for value, label in venue_categories %}<code>{{ label }}</code>{% if not forloop.last %} ou {% endif %}{% endfor %}
           </p>
         </article>
         <article class="card import-reference-card">
-          <p class="card-kicker">Au moins une valeur obligatoire</p>
+          <p class="card-kicker">Colonne facultative</p>
           <h3 class="card-title"><code>thematiques</code></h3>
           <p><strong>Thématiques disponibles :</strong>
             {% for theme in active_themes %}<code>{{ theme.name }}</code>{% if not forloop.last %}, {% endif %}{% empty %}Aucune thématique active — ajoutez-en dans les paramètres avant l’import.{% endfor %}
@@ -90,7 +90,9 @@
       </a>
     </p>
     <p><code>titre_animation;categorie;thematiques;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable</code></p>
-    <p>Les huit premières colonnes sont obligatoires. La catégorie vaut <code>Salle</code> ou <code>Extérieur</code>. Séparez plusieurs thématiques par une barre verticale (<code>|</code>). <code>responsable</code> et <code>email_responsable</code> sont facultatives mais nécessaires pour le publipostage final.</p>
+    <p><strong>Aucune colonne n’est obligatoire.</strong> Vous pouvez conserver uniquement les colonnes dont vous disposez et laisser des cellules vides. Une ligne entièrement vide est ignorée.</p>
+    <p>Pour une nouvelle animation, les valeurs manquantes sont remplacées par des valeurs à compléter : titre généré, catégorie <code>Salle</code>, aucune thématique, lieu <code>À compléter</code>, durée <code>60 min</code>, jauge <code>30</code>, premier jour du salon et horaire <code>09:00</code>. Pour une animation existante retrouvée par son titre, sa catégorie, ses thématiques et sa durée sont conservées lorsque ces cellules sont vides.</p>
+    <p>Lorsqu’elles sont renseignées, la catégorie vaut <code>Salle</code> ou <code>Extérieur</code>, et plusieurs thématiques sont séparées par une barre verticale (<code>|</code>). Le responsable et son courriel restent utiles pour le publipostage final.</p>
     <h3>Exemple</h3>
     <pre><code>titre_animation;categorie;thematiques;lieu_de_rendez_vous;duree;jauge;jour;horaires;responsable;email_responsable
 La vie du sol;Extérieur;Sol|Biodiversité;Pôle sols;45;30;mercredi;"09:00, 10:15, 14:00";Marie Martin;marie@example.org</code></pre>
