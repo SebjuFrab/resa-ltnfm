@@ -93,7 +93,10 @@
       </a>
     </p>
     <p><code>nom_enseignant;prenom_enseignant;email_enseignant;telephone_enseignant;etablissement;type_etablissement;commune;departement;code_groupe;famille;niveau;jour;nb_etudiants;nb_accompagnateurs;effectif_total;remarque_niveau;remarque_generale</code></p>
-    <p>Toutes les colonnes sont obligatoires sauf <code>remarque_niveau</code> et <code>remarque_generale</code>. Le <code>code_groupe</code> doit être unique ; cette obligation empêche qu'un même fichier importé deux fois crée des doublons. L'<code>effectif_total</code> doit être égal au nombre d'étudiants additionné au nombre d'accompagnateurs.</p>
+    <p><strong>Aucune colonne n’est obligatoire.</strong> Vous pouvez conserver uniquement les colonnes dont vous disposez. Les cellules vides sont également acceptées. Une ligne entièrement vide est ignorée. Les colonnes de localisation, notamment <code>commune</code> et <code>departement</code>, peuvent être supprimées.</p>
+    <p>Les informations absentes reçoivent des valeurs provisoires modifiables depuis la fiche du groupe : code généré automatiquement, famille « Autre / groupe mixte », niveau « Non renseigné », premier jour du salon, type d’établissement « Autre », et effectif de 1 élève sans accompagnateur.</p>
+    <p class="alert alert-warning">Sans <code>code_groupe</code>, un nouveau code est généré à chaque import. Évitez donc de réimporter deux fois le même fichier, au risque de créer des doublons.</p>
+    <p>Lorsqu’ils sont fournis, le courriel, les nombres, la date et les référentiels restent contrôlés. Si les trois colonnes d’effectif sont présentes, <code>effectif_total</code> doit correspondre à <code>nb_etudiants</code> + <code>nb_accompagnateurs</code>.</p>
     <ul>
       <li><code>type_etablissement</code> : <code>AGRICULTURAL</code>, <code>HIGH_SCHOOL</code>, <code>HIGHER_EDUCATION</code> ou <code>OTHER</code>.</li>
       <li><code>famille</code> : identifiant visible dans Paramètres, par exemple <code>lycee-agricole</code> ou <code>enseignement-superieur</code>.</li>

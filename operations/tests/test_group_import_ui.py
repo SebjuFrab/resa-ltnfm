@@ -97,6 +97,7 @@ class GroupImportViewTests(TestCase):
         self.assertContains(response, reverse("operations:group-import-template"))
         self.assertContains(response, "Télécharger le modèle CSV")
         self.assertContains(response, "brouillon")
+        self.assertContains(response, "Aucune colonne n’est obligatoire")
 
         dashboard = self.client.get(reverse("operations:dashboard"))
         self.assertContains(dashboard, reverse("operations:group-import"))

@@ -1,4 +1,5 @@
 import csv
+from datetime import date
 from io import StringIO
 
 from django.contrib.auth import get_user_model
@@ -202,7 +203,7 @@ class GroupImportTests(TestCase):
         self.assertEqual(teacher.phone, "02 99 00 00 00")
         self.assertEqual(Registration.objects.count(), 0)
 
-    def test_effectif_total_is_required_and_must_match_components(self):
+    def test_effectif_total_is_optional_and_must_match_when_provided(self):
         missing = preview_group_csv(
             self._upload([self._row(effectif_total="")])
         )
@@ -210,21 +211,67 @@ class GroupImportTests(TestCase):
             self._upload([self._row(effectif_total="25")])
         )
 
-        self.assertFalse(missing.is_valid)
-        self.assertIn("nombre entier", missing.issues[0].message)
+        self.assertTrue(missing.is_valid, missing.issues)
+        self.assertEqual(missing.rows[0].total_count, 26)
         self.assertFalse(mismatch.is_valid)
         self.assertIn("additionné", mismatch.issues[0].message)
 
-    def test_group_code_is_required_and_too_long_values_are_rejected(self):
+    def test_group_code_is_generated_when_missing_and_too_long_values_are_rejected(self):
         missing = preview_group_csv(self._upload([self._row(code_groupe="")]))
         too_long = preview_group_csv(
             self._upload([self._row(code_groupe="a" * 81)])
         )
 
-        self.assertFalse(missing.is_valid)
-        self.assertIn("obligatoire", missing.issues[0].message)
+        self.assertTrue(missing.is_valid, missing.issues)
+        self.assertTrue(missing.rows[0].group_code)
         self.assertFalse(too_long.is_valid)
         self.assertIn("80", too_long.issues[0].message)
+
+    def test_subset_of_columns_and_blank_values_use_safe_defaults(self):
+        preview = preview_group_csv(
+            self._upload(
+                [{"etablissement": "Structure sans autres informations"}],
+                columns=("etablissement",),
+            )
+        )
+
+        self.assertTrue(preview.is_valid, preview.issues)
+        row = preview.rows[0]
+        self.assertEqual(row.institution_name, "Structure sans autres informations")
+        self.assertEqual(row.institution_type, Institution.Type.OTHER)
+        self.assertEqual(row.institution_city, "")
+        self.assertEqual(row.institution_department, "")
+        self.assertEqual(row.teacher_email, "")
+        self.assertTrue(row.teacher_last_name.startswith("À compléter"))
+        self.assertEqual(row.family_slug, "autre-public")
+        self.assertEqual(row.school_level_code, "NON_RENSEIGNE")
+        self.assertEqual(row.visit_date, date(2026, 9, 23))
+        self.assertEqual(row.student_count, 1)
+        self.assertEqual(row.chaperone_count, 0)
+        self.assertEqual(row.total_count, 1)
+
+        try:
+            created = import_group_payload([row.as_payload()], actor_user=self.actor)
+        except GroupImportError as error:
+            self.fail(error.issues)
+
+        registration = created[0]
+        self.assertEqual(registration.teacher.email, "")
+        self.assertEqual(registration.student_count, 1)
+        self.assertEqual(registration.school_level.code, "NON_RENSEIGNE")
+
+    def test_total_can_supply_missing_student_count(self):
+        preview = preview_group_csv(
+            self._upload(
+                [{"effectif_total": "12", "nb_accompagnateurs": "2"}],
+                columns=("effectif_total", "nb_accompagnateurs"),
+            )
+        )
+
+        self.assertTrue(preview.is_valid, preview.issues)
+        self.assertEqual(preview.rows[0].student_count, 10)
+        self.assertEqual(preview.rows[0].chaperone_count, 2)
+        self.assertEqual(preview.rows[0].total_count, 12)
 
     def test_alias_headers_cp1252_comma_and_human_values_are_accepted(self):
         columns = (

@@ -17,7 +17,7 @@ from django.db import IntegrityError, transaction
 
 from catalogue.models import SchoolLevel
 from inscriptions.choices import DEPARTMENT_CHOICES
-from inscriptions.codes import normalize_group_code
+from inscriptions.codes import generate_unique_group_code, normalize_group_code
 from inscriptions.models import (
     GroupFamily,
     Institution,
@@ -52,13 +52,10 @@ GROUP_IMPORT_COLUMNS = (
     "remarque_generale",
 )
 
-OPTIONAL_COLUMNS = {
-    "remarque_niveau",
-    "remarque_generale",
-}
-REQUIRED_COLUMNS = tuple(
-    column for column in GROUP_IMPORT_COLUMNS if column not in OPTIONAL_COLUMNS
-)
+# Toutes les colonnes métier sont facultatives. Une ligne doit seulement contenir
+# au moins une colonne reconnue et une valeur afin de représenter un groupe.
+OPTIONAL_COLUMNS = frozenset(GROUP_IMPORT_COLUMNS)
+REQUIRED_COLUMNS = ()
 
 COLUMN_ALIASES = {
     "nom_enseignant": {
@@ -315,9 +312,7 @@ def _csv_reader(content):
     header_line = content.splitlines()[0]
     semicolon_count = header_line.count(";")
     comma_count = header_line.count(",")
-    if not semicolon_count and not comma_count:
-        raise ValueError("Le séparateur du fichier doit être un point-virgule ou une virgule.")
-    delimiter = ";" if semicolon_count >= comma_count else ","
+    delimiter = ";" if semicolon_count >= comma_count and semicolon_count else ","
     return csv.DictReader(StringIO(content), delimiter=delimiter)
 
 
@@ -343,9 +338,10 @@ def _header_mapping(fieldnames):
         used_columns[canonical] = str(raw_header)
         canonical_by_header[raw_header] = canonical
 
-    missing = [column for column in REQUIRED_COLUMNS if column not in used_columns]
-    if missing:
-        raise ValueError(f"Colonnes manquantes : {', '.join(missing)}.")
+    if not canonical_by_header:
+        raise ValueError(
+            "Aucune colonne reconnue. Utilisez au moins un intitulé du modèle CSV."
+        )
     return canonical_by_header
 
 
@@ -358,8 +354,15 @@ def _text(value, *, label, max_length, required=True):
     return cleaned
 
 
-def _email(value):
-    cleaned = _text(value, label="le courriel de l'enseignant", max_length=254)
+def _email(value, *, required=False):
+    cleaned = _text(
+        value,
+        label="le courriel de l'enseignant",
+        max_length=254,
+        required=required,
+    )
+    if not cleaned:
+        return ""
     try:
         validate_email(cleaned)
     except ValidationError as error:
@@ -368,7 +371,7 @@ def _email(value):
 
 
 def _integer(value, *, label, minimum, maximum):
-    raw_value = str(value or "").strip()
+    raw_value = "" if value is None else str(value).strip()
     try:
         parsed = int(raw_value)
     except (TypeError, ValueError) as error:
@@ -376,6 +379,12 @@ def _integer(value, *, label, minimum, maximum):
     if parsed < minimum or parsed > maximum:
         raise ValueError(f"{label} doit être compris entre {minimum} et {maximum}")
     return parsed
+
+
+def _optional_integer(value, *, label, minimum, maximum, default=None):
+    if not str(value or "").strip():
+        return default
+    return _integer(value, label=label, minimum=minimum, maximum=maximum)
 
 
 def _event_dates():
@@ -387,9 +396,11 @@ def _event_dates():
 
 def _day(value):
     raw_value = str(value or "").strip()
-    if not raw_value:
-        raise ValueError("le jour est obligatoire")
     configured_dates = _event_dates()
+    if not configured_dates:
+        raise ValueError("aucun jour du salon n'est configuré")
+    if not raw_value:
+        return configured_dates[0]
     parsed = None
     for date_format in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
@@ -417,6 +428,8 @@ def _day(value):
 
 def _department(value):
     raw_value = str(value or "").strip()
+    if not raw_value:
+        return ""
     match = re.fullmatch(r"(\d{2,3})(?:\s*(?:-|\u2013|\u2014|:)\s*.+)?", raw_value)
     department = match.group(1) if match else raw_value
     if department not in ALLOWED_DEPARTMENTS:
@@ -427,6 +440,8 @@ def _department(value):
 
 def _institution_type(value):
     normalized = _normalize(value)
+    if not normalized:
+        return Institution.Type.OTHER
     choices = {
         _normalize(choice.value): choice.value for choice in Institution.Type
     }
@@ -449,8 +464,23 @@ def _matching_objects(queryset, value, *, fields):
 
 
 def _resolve_family(value):
-    value = _text(value, label="la famille", max_length=120)
+    value = _text(value, label="la famille", max_length=120, required=False)
     all_families = list(GroupFamily.objects.all())
+    if not value:
+        fallback = next(
+            (
+                family
+                for family in all_families
+                if family.is_active and family.slug == "autre-public"
+            ),
+            None,
+        )
+        fallback = fallback or next(
+            (family for family in all_families if family.is_active), None
+        )
+        if fallback is None:
+            raise ValueError("aucune famille active n'est configurée")
+        return fallback
     matches = _matching_objects(all_families, value, fields=("slug", "name"))
     matches = list({family.pk: family for family in matches}.values())
     active_matches = [family for family in matches if family.is_active]
@@ -464,8 +494,23 @@ def _resolve_family(value):
 
 
 def _resolve_school_level(value):
-    value = _text(value, label="le niveau", max_length=100)
+    value = _text(value, label="le niveau", max_length=100, required=False)
     all_levels = list(SchoolLevel.objects.all())
+    if not value:
+        fallback = next(
+            (
+                level
+                for level in all_levels
+                if level.is_active and level.code == "NON_RENSEIGNE"
+            ),
+            None,
+        )
+        fallback = fallback or next(
+            (level for level in all_levels if level.is_active), None
+        )
+        if fallback is None:
+            raise ValueError("aucun niveau actif n'est configuré")
+        return fallback
     matches = _matching_objects(all_levels, value, fields=("code", "label"))
     matches = list({level.pk: level for level in matches}.values())
     active_matches = [level for level in matches if level.is_active]
@@ -535,7 +580,11 @@ def _find_teacher(*, institution, email, first_name, last_name, phone):
 def _available_group_code(raw_code, seen_codes):
     raw_code = str(raw_code or "").strip()
     if not raw_code:
-        raise ValueError("le code du groupe est obligatoire")
+        for _attempt in range(20):
+            code = generate_unique_group_code()
+            if code not in seen_codes:
+                return code
+        raise ValueError("impossible de générer un code de groupe disponible")
     if len(raw_code) > 80:
         raise ValueError("le code du groupe ne doit pas dépasser 80 caractères")
     code = normalize_group_code(raw_code)
@@ -549,49 +598,73 @@ def _available_group_code(raw_code, seen_codes):
 
 
 def _row_from_mapping(mapping, line, seen_codes):
+    group_code = _available_group_code(mapping.get("code_groupe", ""), seen_codes)
     last_name = _text(
-        mapping["nom_enseignant"], label="le nom de l'enseignant", max_length=100
+        mapping["nom_enseignant"],
+        label="le nom de l'enseignant",
+        max_length=100,
+        required=False,
     )
     first_name = _text(
         mapping["prenom_enseignant"],
         label="le prénom de l'enseignant",
         max_length=100,
+        required=False,
     )
     email = _email(mapping["email_enseignant"])
     phone = _text(
         mapping["telephone_enseignant"],
         label="le téléphone de l'enseignant",
         max_length=30,
+        required=False,
     )
     institution_name = _text(
-        mapping["etablissement"], label="le nom de l'établissement", max_length=200
+        mapping["etablissement"],
+        label="le nom de l'établissement",
+        max_length=200,
+        required=False,
     )
+    institution_name = institution_name or f"Établissement à compléter — {group_code}"
+    if not last_name and not first_name and not email and not phone:
+        last_name = f"À compléter ({group_code})"
     institution_type = _institution_type(mapping["type_etablissement"])
-    institution_city = _text(mapping["commune"], label="la commune", max_length=120)
+    institution_city = _text(
+        mapping["commune"], label="la commune", max_length=120, required=False
+    )
     institution_department = _department(mapping["departement"])
     family = _resolve_family(mapping["famille"])
     school_level = _resolve_school_level(mapping["niveau"])
     visit_date = _day(mapping["jour"])
-    student_count = _integer(
+    student_count = _optional_integer(
         mapping["nb_etudiants"],
         label="le nombre d'étudiants",
         minimum=1,
         maximum=MAX_STUDENTS,
     )
-    chaperone_count = _integer(
+    chaperone_count = _optional_integer(
         mapping["nb_accompagnateurs"],
         label="le nombre d'accompagnateurs",
         minimum=0,
         maximum=MAX_CHAPERONES,
+        default=0,
     )
-    total_count = student_count + chaperone_count
-    parsed_total = _integer(
+    parsed_total = _optional_integer(
         mapping["effectif_total"],
         label="l'effectif total",
         minimum=1,
         maximum=MAX_STUDENTS + MAX_CHAPERONES,
     )
-    if parsed_total != total_count:
+    if student_count is None:
+        student_count = (
+            parsed_total - chaperone_count if parsed_total is not None else 1
+        )
+        if student_count < 1 or student_count > MAX_STUDENTS:
+            raise ValueError(
+                "l'effectif total doit contenir au moins un étudiant après "
+                "déduction des accompagnateurs"
+            )
+    total_count = student_count + chaperone_count
+    if parsed_total is not None and parsed_total != total_count:
         raise ValueError(
             "l'effectif total doit être égal au nombre d'étudiants additionné "
             "au nombre d'accompagnateurs"
@@ -608,8 +681,6 @@ def _row_from_mapping(mapping, line, seen_codes):
         max_length=5_000,
         required=False,
     )
-    group_code = _available_group_code(mapping.get("code_groupe", ""), seen_codes)
-
     institution = _find_institution(
         name=institution_name,
         city=institution_city,
@@ -772,12 +843,14 @@ def _payload_row(payload):
                 data["teacher_first_name"],
                 label="le prénom de l'enseignant",
                 max_length=100,
+                required=False,
             ),
             teacher_email=_email(data["teacher_email"]),
             teacher_phone=_text(
                 data["teacher_phone"],
                 label="le téléphone de l'enseignant",
                 max_length=30,
+                required=False,
             ),
             institution_name=_text(
                 data["institution_name"],
@@ -786,7 +859,10 @@ def _payload_row(payload):
             ),
             institution_type=_institution_type(data["institution_type"]),
             institution_city=_text(
-                data["institution_city"], label="la commune", max_length=120
+                data["institution_city"],
+                label="la commune",
+                max_length=120,
+                required=False,
             ),
             institution_department=_department(data["institution_department"]),
             institution_id=(
@@ -839,7 +915,9 @@ def _payload_row(payload):
             ),
         )
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("les données de l'aperçu ne sont plus valides") from error
+        raise ValueError(
+            f"les données de l'aperçu ne sont plus valides : {error}"
+        ) from error
 
     if not row.group_code:
         raise ValueError("le code du groupe n'est plus valide")
