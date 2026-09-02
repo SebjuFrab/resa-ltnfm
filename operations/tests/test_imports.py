@@ -314,7 +314,7 @@ class SessionImportTests(TestCase):
         self.assertEqual(Animation.objects.count(), 1)
         self.assertEqual(Session.objects.count(), 0)
 
-    def test_duplicate_and_overlapping_times_are_rejected(self):
+    def test_duplicate_times_are_rejected_but_overlapping_times_are_allowed(self):
         duplicate = preview_session_csv(
             self._upload("Animation A;Salle;Sol;Salle A;45;30;mercredi;10:00,10:00;;\n")
         )
@@ -324,8 +324,16 @@ class SessionImportTests(TestCase):
 
         self.assertFalse(duplicate.is_valid)
         self.assertIn("dupliqué", duplicate.issues[0].message)
-        self.assertFalse(overlapping.is_valid)
-        self.assertIn("chevauchent", overlapping.issues[0].message)
+        self.assertTrue(overlapping.is_valid, overlapping.issues)
+        self.assertEqual(
+            [(row.starts_at.isoformat(), row.ends_at.isoformat()) for row in overlapping.rows],
+            [("10:00:00", "10:45:00"), ("10:30:00", "11:15:00")],
+        )
+
+        sessions = import_session_payload([row.as_payload() for row in overlapping.rows])
+
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual(Session.objects.count(), 2)
 
     def test_invalid_responsible_email_is_rejected(self):
         preview = preview_session_csv(

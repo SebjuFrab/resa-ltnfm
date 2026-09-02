@@ -490,10 +490,6 @@ def _rows_from_mapping(mapping, line, theme_lookup, ambiguous_theme_tokens):
             )
         )
 
-    ordered_rows = sorted(rows, key=lambda row: row.starts_at)
-    for previous, current in zip(ordered_rows, ordered_rows[1:], strict=False):
-        if current.starts_at < previous.ends_at:
-            raise ValueError("les horaires de cette ligne se chevauchent")
     return rows
 
 
