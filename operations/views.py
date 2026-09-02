@@ -39,7 +39,7 @@ from inscriptions.models import (
     Reservation,
     Teacher,
 )
-from inscriptions.services.capacity import CapacityError
+from inscriptions.services.capacity import CapacityError, capacity_warnings
 from inscriptions.services.registration import (
     RegistrationError,
     ReservationRequest,
@@ -101,6 +101,8 @@ SESSION_IMPORT_COLUMNS = (
     "responsable",
     "email_responsable",
 )
+
+
 def _requested_date(request):
     value = request.GET.get("date", "")
     return parse_date(value) if value else None
@@ -116,9 +118,7 @@ def _filter_registrations(queryset, search_form):
 
     query = search_form.cleaned_data["q"].strip()
     if query:
-        filters = Q(institution__name__icontains=query) | Q(
-            group_name__icontains=query
-        )
+        filters = Q(institution__name__icontains=query) | Q(group_name__icontains=query)
         filters |= Q(group_code__icontains=query)
         filters |= Q(teacher__first_name__icontains=query)
         filters |= Q(teacher__last_name__icontains=query)
@@ -159,17 +159,17 @@ def dashboard(request):
         students=Coalesce(Sum("student_count"), 0),
         chaperones=Coalesce(Sum("chaperone_count"), 0),
     )
-    unassigned_participants = (
-        unassigned_totals["students"] + unassigned_totals["chaperones"]
-    )
+    unassigned_participants = unassigned_totals["students"] + unassigned_totals["chaperones"]
 
     session_metrics = []
     available_by_slot = defaultdict(int)
     total_capacity = 0
     total_reserved = 0
-    for session in Session.objects.with_capacities(at=timezone.now()).select_related(
-        "animation"
-    ).order_by("date", "starts_at", "animation__title"):
+    for session in (
+        Session.objects.with_capacities(at=timezone.now())
+        .select_related("animation")
+        .order_by("date", "starts_at", "animation__title")
+    ):
         fill_rate = (
             round((session.reserved_capacity / session.max_capacity) * 100, 1)
             if session.max_capacity
@@ -218,12 +218,8 @@ def dashboard(request):
         else 0,
         "full_session_count": sum(metric["is_full"] for metric in session_metrics),
         "low_session_count": sum(metric["is_low"] for metric in session_metrics),
-        "overbooked_session_count": sum(
-            metric["is_overbooked"] for metric in session_metrics
-        ),
-        "incomplete_count": Registration.objects.filter(
-            status=Registration.Status.DRAFT
-        ).count(),
+        "overbooked_session_count": sum(metric["is_overbooked"] for metric in session_metrics),
+        "incomplete_count": Registration.objects.filter(status=Registration.Status.DRAFT).count(),
         "session_metrics": session_metrics,
         "available_by_slot": [
             {"date": key[0], "starts_at": key[1], "remaining": value}
@@ -264,13 +260,9 @@ def registration_list(request):
     )
     registrations = _filter_registrations(registrations, filter_form)
     page = Paginator(registrations, 50).get_page(request.GET.get("page"))
-    last_import_references = set(
-        request.session.get(LAST_GROUP_IMPORT_SESSION_KEY, ())
-    )
+    last_import_references = set(request.session.get(LAST_GROUP_IMPORT_SESSION_KEY, ()))
     for registration in page.object_list:
-        registration.is_from_last_import = (
-            str(registration.reference) in last_import_references
-        )
+        registration.is_from_last_import = str(registration.reference) in last_import_references
     pagination_query = request.GET.copy()
     pagination_query.pop("page", None)
     return render(
@@ -279,12 +271,8 @@ def registration_list(request):
         {
             "filter_form": filter_form,
             "registration_page": page,
-            "draft_count": Registration.objects.filter(
-                status=Registration.Status.DRAFT
-            ).count(),
-            "pagination_prefix": (
-                f"{pagination_query.urlencode()}&" if pagination_query else ""
-            ),
+            "draft_count": Registration.objects.filter(status=Registration.Status.DRAFT).count(),
+            "pagination_prefix": (f"{pagination_query.urlencode()}&" if pagination_query else ""),
         },
     )
 
@@ -388,9 +376,7 @@ def session_import(request):
             "preview": preview,
             "issues": preview.issues if preview else (),
             "venue_categories": Animation.VenueCategory.choices,
-            "active_themes": Theme.objects.filter(is_active=True).order_by(
-                "sort_order", "name"
-            ),
+            "active_themes": Theme.objects.filter(is_active=True).order_by("sort_order", "name"),
         },
         status=400 if preview and preview.issues else 200,
     )
@@ -407,9 +393,7 @@ def session_import(request):
 )
 def session_import_template(request):
     response = HttpResponse(content_type="text/csv; charset=utf-8")
-    response["Content-Disposition"] = (
-        'attachment; filename="modele_import_animations.csv"'
-    )
+    response["Content-Disposition"] = 'attachment; filename="modele_import_animations.csv"'
     response.write("\ufeff")
 
     writer = csv.writer(response, delimiter=";", lineterminator="\r\n")
@@ -467,16 +451,14 @@ def group_import(request):
                 "operations/group_import.html",
                 {"form": GroupImportForm(), "issues": error.issues},
                 status=400,
-        )
+            )
         request.session.pop(GROUP_IMPORT_SESSION_KEY, None)
         request.session[LAST_GROUP_IMPORT_SESSION_KEY] = [
             str(registration.reference) for registration in registrations
         ]
         count = len(registrations)
         imported_label = (
-            "groupe importé comme brouillon"
-            if count == 1
-            else "groupes importés comme brouillons"
+            "groupe importé comme brouillon" if count == 1 else "groupes importés comme brouillons"
         )
         messages.success(
             request,
@@ -487,8 +469,7 @@ def group_import(request):
             ),
         )
         return redirect(
-            f"{reverse('operations:registration-list')}"
-            f"?status={Registration.Status.DRAFT}"
+            f"{reverse('operations:registration-list')}?status={Registration.Status.DRAFT}"
         )
 
     form = GroupImportForm(request.POST or None, request.FILES or None)
@@ -496,9 +477,7 @@ def group_import(request):
     if request.method == "POST" and form.is_valid():
         preview = preview_group_csv(form.cleaned_data["file"])
         if preview.is_valid:
-            request.session[GROUP_IMPORT_SESSION_KEY] = [
-                row.as_payload() for row in preview.rows
-            ]
+            request.session[GROUP_IMPORT_SESSION_KEY] = [row.as_payload() for row in preview.rows]
         else:
             request.session.pop(GROUP_IMPORT_SESSION_KEY, None)
     return render(
@@ -517,9 +496,7 @@ def group_import(request):
 @permission_required(REGISTRATION_MANAGE_PERMISSIONS, raise_exception=True)
 def group_import_template(request):
     response = HttpResponse(content_type="text/csv; charset=utf-8")
-    response["Content-Disposition"] = (
-        'attachment; filename="modele_import_groupes.csv"'
-    )
+    response["Content-Disposition"] = 'attachment; filename="modele_import_groupes.csv"'
     response.write("\ufeff")
 
     writer = csv.writer(response, delimiter=";", lineterminator="\r\n")
@@ -613,21 +590,17 @@ def export_download(request):
     if not request.user.has_perms(required_permissions[export_type]):
         raise PermissionDenied
     delimiter = "," if form.cleaned_data["delimiter"] == "comma" else ";"
-    return exporters[export_type](
-        visit_date=form.cleaned_data["date"], delimiter=delimiter
-    )
+    return exporters[export_type](visit_date=form.cleaned_data["date"], delimiter=delimiter)
 
 
 def _staff_registration(reference):
     return get_object_or_404(
-        Registration.objects.select_related(
-            "institution", "teacher", "school_level", "family"
-        ),
+        Registration.objects.select_related("institution", "teacher", "school_level", "family"),
         reference=reference,
     )
 
 
-def _pending_update_payload(data):
+def _pending_update_payload(data, *, notify_teacher):
     institution = data["existing_institution"]
     return {
         "existing_institution_id": institution.pk if institution else None,
@@ -647,12 +620,16 @@ def _pending_update_payload(data):
         "chaperone_count": data["chaperone_count"],
         "level_comment": data["level_comment"],
         "comment": data["comment"],
+        "notify_teacher": notify_teacher,
     }
 
 
-def _store_pending_update(request, registration, data):
+def _store_pending_update(request, registration, data, *, notify_teacher):
     pending_updates = request.session.get(PENDING_REGISTRATION_UPDATE_KEY, {})
-    pending_updates[str(registration.reference)] = _pending_update_payload(data)
+    pending_updates[str(registration.reference)] = _pending_update_payload(
+        data,
+        notify_teacher=notify_teacher,
+    )
     request.session[PENDING_REGISTRATION_UPDATE_KEY] = pending_updates
 
 
@@ -701,7 +678,17 @@ def _load_pending_update(request, registration):
         "chaperone_count": payload["chaperone_count"],
         "level_comment": payload["level_comment"],
         "comment": payload["comment"],
+        "notify_teacher": payload.get("notify_teacher", True),
     }
+
+
+def _wants_teacher_notification(request, *, default=True):
+    action = request.POST.get("action", "")
+    if action in {"save_draft", "save_without_notification"}:
+        return False
+    if action == "save_and_notify":
+        return True
+    return default
 
 
 def _save_contact_details(data, *, registration=None):
@@ -728,16 +715,12 @@ def _save_contact_details(data, *, registration=None):
         "email": data["teacher_email"].strip(),
         "phone": data["teacher_phone"].strip(),
     }
-    teacher = Teacher.objects.filter(
-        institution=institution, email__iexact=values["email"]
-    ).first()
+    teacher = Teacher.objects.filter(institution=institution, email__iexact=values["email"]).first()
     if teacher is None:
         teacher = Teacher.objects.create(institution=institution, **values)
         return institution, teacher
 
-    changed_fields = [
-        field for field, value in values.items() if getattr(teacher, field) != value
-    ]
+    changed_fields = [field for field, value in values.items() if getattr(teacher, field) != value]
     other_registrations = teacher.registrations.all()
     if registration is not None:
         other_registrations = other_registrations.exclude(pk=registration.pk)
@@ -751,9 +734,9 @@ def _save_contact_details(data, *, registration=None):
 
 
 def _active_reservations(registration):
-    return registration.reservations.filter(
-        status=Reservation.Status.ACTIVE
-    ).select_related("session", "session__animation")
+    return registration.reservations.filter(status=Reservation.Status.ACTIVE).select_related(
+        "session", "session__animation"
+    )
 
 
 @staff_member_required
@@ -861,15 +844,10 @@ def _planning_context(request, registration, *, pending_update=None):
         session
         for session in all_sessions
         if session.pk in current_session_ids
-        and (
-            not session.animation.is_active
-            or session.status == Session.Status.CANCELLED
-        )
+        and (not session.animation.is_active or session.status == Session.Status.CANCELLED)
     ]
     sessions.extend(
-        session
-        for session in unavailable_reservations
-        if session.pk not in displayed_ids
+        session for session in unavailable_reservations if session.pk not in displayed_ids
     )
     sessions.sort(
         key=lambda session: (
@@ -891,18 +869,22 @@ def _planning_context(request, registration, *, pending_update=None):
     planning_post_query = f"date={planning_date.isoformat()}"
     if pending_update:
         planning_post_query = f"reschedule=1&{planning_post_query}"
-    return sessions, planning_form, {
-        "registration": planning_registration,
-        "institution_name": institution_name,
-        "is_rescheduling": bool(pending_update),
-        "pending_day_change": pending_day_change,
-        "planning_date": planning_date,
-        "filter_form": filter_form,
-        "planning_form": planning_form,
-        "session_rows": planning_form.session_rows(sessions),
-        "action_url": action_url,
-        "planning_post_url": f"{action_url}?{planning_post_query}",
-    }
+    return (
+        sessions,
+        planning_form,
+        {
+            "registration": planning_registration,
+            "institution_name": institution_name,
+            "is_rescheduling": bool(pending_update),
+            "pending_day_change": pending_day_change,
+            "planning_date": planning_date,
+            "filter_form": filter_form,
+            "planning_form": planning_form,
+            "session_rows": planning_form.session_rows(sessions),
+            "action_url": action_url,
+            "planning_post_url": f"{action_url}?{planning_post_query}",
+        },
+    )
 
 
 def _planning_requests(
@@ -920,9 +902,7 @@ def _planning_requests(
                 reservation.student_count,
                 reservation.chaperone_count,
             )
-            for reservation in registration.reservations.filter(
-                status=Reservation.Status.ACTIVE
-            )
+            for reservation in registration.reservations.filter(status=Reservation.Status.ACTIVE)
             if reservation.session_id not in displayed_ids
         }
     retained_counts.update(requested_counts)
@@ -932,10 +912,18 @@ def _planning_requests(
             student_count=student_count,
             chaperone_count=chaperone_count,
         )
-        for session_id, (student_count, chaperone_count) in sorted(
-            retained_counts.items()
-        )
+        for session_id, (student_count, chaperone_count) in sorted(retained_counts.items())
     ]
+
+
+def _over_capacity_warnings(registration, reservation_requests):
+    return capacity_warnings(
+        {
+            reservation.session_id: reservation.total_participant_count
+            for reservation in reservation_requests
+        },
+        excluding_registration_id=registration.pk,
+    )
 
 
 @staff_member_required
@@ -947,9 +935,7 @@ def registration_planning(request, reference):
         messages.error(request, "Une inscription annulée ne peut plus être modifiée.")
         return redirect("operations:registration-detail", reference=reference)
     is_rescheduling = request.GET.get("reschedule") == "1"
-    pending_update = (
-        _load_pending_update(request, registration) if is_rescheduling else None
-    )
+    pending_update = _load_pending_update(request, registration) if is_rescheduling else None
     if is_rescheduling and pending_update is None:
         messages.error(
             request,
@@ -977,6 +963,14 @@ def registration_planning(request, reference):
             "d’enregistrer le planning.",
         )
     elif request.method == "POST" and form.is_valid():
+        notify_teacher = _wants_teacher_notification(
+            request,
+            default=(pending_update or {}).get("notify_teacher", True),
+        )
+        save_as_draft = (
+            registration.status == Registration.Status.DRAFT
+            and request.POST.get("action") == "save_draft"
+        )
         requested_counts = form.requested_counts()
         reservation_requests = _planning_requests(
             context["registration"],
@@ -989,6 +983,11 @@ def registration_planning(request, reference):
                 None,
                 "Sélectionnez au moins une animation avant d'enregistrer les modifications.",
             )
+            context["session_rows"] = form.session_rows(sessions)
+            return render(request, "operations/registration_planning.html", context)
+        over_capacity_warnings = _over_capacity_warnings(registration, reservation_requests)
+        if over_capacity_warnings and request.POST.get("confirm_over_capacity") != "yes":
+            context["over_capacity_warnings"] = over_capacity_warnings
             context["session_rows"] = form.session_rows(sessions)
             return render(request, "operations/registration_planning.html", context)
         try:
@@ -1015,10 +1014,8 @@ def registration_planning(request, reference):
                         actor_kind=RegistrationEvent.ActorKind.STAFF,
                         actor_user=request.user,
                     )
-                    if registration.status == Registration.Status.CONFIRMED:
-                        schedule_registration_email(
-                            registration, EmailLog.Kind.MODIFICATION
-                        )
+                    if registration.status == Registration.Status.CONFIRMED and notify_teacher:
+                        schedule_registration_email(registration, EmailLog.Kind.MODIFICATION)
             elif registration.status == Registration.Status.DRAFT:
                 registration = save_draft(
                     registration,
@@ -1035,15 +1032,24 @@ def registration_planning(request, reference):
                     actor_kind=RegistrationEvent.ActorKind.STAFF,
                     actor_user=request.user,
                 )
-                schedule_registration_email(
-                    registration, EmailLog.Kind.MODIFICATION
-                )
+                if notify_teacher:
+                    schedule_registration_email(registration, EmailLog.Kind.MODIFICATION)
         except (RegistrationError, CapacityError) as error:
             form.add_error(None, str(error))
         else:
             if pending_update:
                 _clear_pending_update(request, registration)
                 if registration.status == Registration.Status.DRAFT:
+                    if save_as_draft:
+                        messages.success(
+                            request,
+                            "Le brouillon et ses places sont enregistrés sans prévenir "
+                            "le professeur.",
+                        )
+                        return redirect(
+                            "operations:registration-detail",
+                            reference=registration.reference,
+                        )
                     messages.success(
                         request,
                         "Les modifications et le programme du brouillon sont enregistrés.",
@@ -1052,26 +1058,45 @@ def registration_planning(request, reference):
                         "operations:registration-review",
                         reference=registration.reference,
                     )
-                messages.success(
-                    request,
-                    "Les modifications et le programme sont enregistrés. "
-                    "Le professeur va recevoir un récapitulatif de modification.",
-                )
+                if notify_teacher:
+                    messages.success(
+                        request,
+                        "Les modifications et le programme sont enregistrés. "
+                        "Le professeur va recevoir un récapitulatif de modification.",
+                    )
+                else:
+                    messages.success(
+                        request,
+                        "Les modifications et le programme sont enregistrés sans "
+                        "prévenir le professeur.",
+                    )
                 return redirect(
                     "operations:registration-detail",
                     reference=registration.reference,
                 )
             if registration.status == Registration.Status.DRAFT:
-                return redirect(
-                    "operations:registration-review", reference=registration.reference
+                if save_as_draft:
+                    messages.success(
+                        request,
+                        "Le brouillon et ses places sont enregistrés sans prévenir le professeur.",
+                    )
+                    return redirect(
+                        "operations:registration-detail",
+                        reference=registration.reference,
+                    )
+                return redirect("operations:registration-review", reference=registration.reference)
+            if notify_teacher:
+                messages.success(
+                    request,
+                    "Le programme est modifié et le professeur va recevoir un nouveau "
+                    "récapitulatif.",
                 )
-            messages.success(
-                request,
-                "Le programme est modifié et le professeur va recevoir un nouveau récapitulatif.",
-            )
-            return redirect(
-                "operations:registration-detail", reference=registration.reference
-            )
+            else:
+                messages.success(
+                    request,
+                    "Le programme est modifié sans prévenir le professeur.",
+                )
+            return redirect("operations:registration-detail", reference=registration.reference)
     context["session_rows"] = form.session_rows(sessions)
     return render(request, "operations/registration_planning.html", context)
 
@@ -1085,6 +1110,23 @@ def registration_review(request, reference):
         return redirect("operations:registration-detail", reference=reference)
     reservations = _active_reservations(registration)
     form = ConfirmationForm(request.POST or None)
+    over_capacity_warnings = _over_capacity_warnings(
+        registration,
+        [
+            ReservationRequest(
+                session_id=reservation.session_id,
+                student_count=reservation.student_count,
+                chaperone_count=reservation.chaperone_count,
+            )
+            for reservation in reservations
+        ],
+    )
+    if request.method == "POST" and request.POST.get("action") == "save_draft":
+        messages.success(
+            request,
+            "Le brouillon et ses places sont conservés sans prévenir le professeur.",
+        )
+        return redirect("operations:registration-detail", reference=registration.reference)
     if request.method == "POST" and form.is_valid():
         try:
             registration = confirm_registration(
@@ -1100,13 +1142,16 @@ def registration_review(request, reference):
                 request,
                 "L'inscription est confirmée et le récapitulatif va être envoyé au professeur.",
             )
-            return redirect(
-                "operations:registration-detail", reference=registration.reference
-            )
+            return redirect("operations:registration-detail", reference=registration.reference)
     return render(
         request,
         "operations/registration_review.html",
-        {"registration": registration, "reservations": reservations, "form": form},
+        {
+            "registration": registration,
+            "reservations": reservations,
+            "form": form,
+            "over_capacity_warnings": over_capacity_warnings,
+        },
     )
 
 
@@ -1135,11 +1180,10 @@ def registration_update(request, reference):
         return redirect("operations:registration-detail", reference=reference)
     if request.method == "GET":
         _clear_pending_update(request, registration)
-    form = StaffRegistrationForm(
-        request.POST or None, registration=registration
-    )
+    form = StaffRegistrationForm(request.POST or None, registration=registration)
     if request.method == "POST" and form.is_valid():
         data = form.cleaned_data
+        notify_teacher = _wants_teacher_notification(request)
         day_changed = data["visit_date"] != registration.visit_date
         participant_counts_changed = (
             data["student_count"] != registration.student_count
@@ -1149,7 +1193,12 @@ def registration_update(request, reference):
             status=Reservation.Status.ACTIVE
         ).exists()
         if day_changed or (participant_counts_changed and has_active_reservations):
-            _store_pending_update(request, registration, data)
+            _store_pending_update(
+                request,
+                registration,
+                data,
+                notify_teacher=notify_teacher,
+            )
             messages.warning(
                 request,
                 "Vérifiez la répartition du groupe dans les animations. Rien ne sera "
@@ -1162,9 +1211,7 @@ def registration_update(request, reference):
             return redirect(f"{planning_url}?reschedule=1")
         try:
             with transaction.atomic():
-                institution, teacher = _save_contact_details(
-                    data, registration=registration
-                )
+                institution, teacher = _save_contact_details(data, registration=registration)
                 registration = update_registration(
                     registration,
                     institution=institution,
@@ -1181,27 +1228,34 @@ def registration_update(request, reference):
                     actor_kind=RegistrationEvent.ActorKind.STAFF,
                     actor_user=request.user,
                 )
-                if registration.status == Registration.Status.CONFIRMED:
-                    schedule_registration_email(
-                        registration, EmailLog.Kind.MODIFICATION
-                    )
+                if registration.status == Registration.Status.CONFIRMED and notify_teacher:
+                    schedule_registration_email(registration, EmailLog.Kind.MODIFICATION)
         except (RegistrationError, CapacityError) as error:
             form.add_error(None, str(error))
         else:
             _clear_pending_update(request, registration)
             if registration.status == Registration.Status.DRAFT:
                 messages.success(request, "La fiche du brouillon est mise à jour.")
+                if not notify_teacher:
+                    return redirect(
+                        "operations:registration-detail",
+                        reference=registration.reference,
+                    )
                 return redirect(
                     "operations:registration-review",
                     reference=registration.reference,
                 )
-            messages.success(
-                request,
-                "La fiche est modifiée et le professeur va recevoir un nouveau récapitulatif.",
-            )
-            return redirect(
-                "operations:registration-detail", reference=registration.reference
-            )
+            if notify_teacher:
+                messages.success(
+                    request,
+                    "La fiche est modifiée et le professeur va recevoir un nouveau récapitulatif.",
+                )
+            else:
+                messages.success(
+                    request,
+                    "La fiche est modifiée sans prévenir le professeur.",
+                )
+            return redirect("operations:registration-detail", reference=registration.reference)
     return render(
         request,
         "operations/registration_form.html",
@@ -1229,12 +1283,8 @@ def registration_cancel(request, reference):
         except RegistrationError as error:
             form.add_error(None, str(error))
         else:
-            messages.success(
-                request, "L'inscription est annulée et le professeur va être prévenu."
-            )
-            return redirect(
-                "operations:registration-detail", reference=registration.reference
-            )
+            messages.success(request, "L'inscription est annulée et le professeur va être prévenu.")
+            return redirect("operations:registration-detail", reference=registration.reference)
     return render(
         request,
         "operations/registration_cancel.html",
@@ -1277,9 +1327,7 @@ def mailing_create(request):
             "<p>Vous trouverez ci-dessous le programme et les informations "
             "utiles pour préparer la venue de votre groupe au salon.</p>"
         ),
-        "organizer_subject": (
-            "Organisation de votre animation — La Terre est Notre Métier"
-        ),
+        "organizer_subject": ("Organisation de votre animation — La Terre est Notre Métier"),
         "organizer_body_html": (
             "<p>Vous trouverez ci-dessous les horaires, les effectifs et les "
             "coordonnées des groupes attendus sur vos animations.</p>"
@@ -1291,9 +1339,7 @@ def mailing_create(request):
         preview = preview_mailing_recipients()
     elif form.is_valid():
         data = form.cleaned_data
-        preview = preview_mailing_recipients(
-            visit_date=data["visit_date"], family=data["family"]
-        )
+        preview = preview_mailing_recipients(visit_date=data["visit_date"], family=data["family"])
         action = request.POST.get("action", "")
         if action in send_actions:
             recipient_kinds = send_actions[action]
@@ -1336,13 +1382,9 @@ def mailing_create(request):
                             request,
                             f"Publipostage terminé : {result.sent_count} message(s) envoyé(s).",
                         )
-                    return redirect(
-                        "operations:mailing-detail", campaign_id=result.campaign.pk
-                    )
+                    return redirect("operations:mailing-detail", campaign_id=result.campaign.pk)
     source_html = (
-        request.POST.get("body_html", "")
-        if request.method == "POST"
-        else initial["body_html"]
+        request.POST.get("body_html", "") if request.method == "POST" else initial["body_html"]
     )
     organizer_source_html = (
         request.POST.get("organizer_body_html", "")
@@ -1358,8 +1400,7 @@ def mailing_create(request):
             "editor_html": sanitize_rich_html(source_html),
             "organizer_editor_html": sanitize_rich_html(organizer_source_html),
             "mailing_template_variables": MAILING_TEMPLATE_VARIABLES,
-            "idempotency_key": request.POST.get("idempotency_key")
-            or uuid.uuid4().hex,
+            "idempotency_key": request.POST.get("idempotency_key") or uuid.uuid4().hex,
         },
     )
 
@@ -1370,34 +1411,22 @@ def mailing_detail(request, campaign_id):
     campaign = get_object_or_404(
         MailingCampaign.objects.select_related("created_by"), pk=campaign_id
     )
-    deliveries = campaign.deliveries.order_by(
-        "recipient_kind", "recipient", "pk"
-    )
-    group_deliveries = deliveries.filter(
-        recipient_kind=MailingDelivery.RecipientKind.TEACHER
-    )
-    organizer_deliveries = deliveries.filter(
-        recipient_kind=MailingDelivery.RecipientKind.ORGANIZER
-    )
+    deliveries = campaign.deliveries.order_by("recipient_kind", "recipient", "pk")
+    group_deliveries = deliveries.filter(recipient_kind=MailingDelivery.RecipientKind.TEACHER)
+    organizer_deliveries = deliveries.filter(recipient_kind=MailingDelivery.RecipientKind.ORGANIZER)
     return render(
         request,
         "operations/mailing_detail.html",
         {
             "campaign": campaign,
             "deliveries": deliveries,
-            "group_sent_count": group_deliveries.filter(
-                status=MailingDelivery.Status.SENT
-            ).count(),
+            "group_sent_count": group_deliveries.filter(status=MailingDelivery.Status.SENT).count(),
             "has_group_deliveries": group_deliveries.exists(),
             "organizer_sent_count": organizer_deliveries.filter(
                 status=MailingDelivery.Status.SENT
             ).count(),
             "has_organizer_deliveries": organizer_deliveries.exists(),
-            "sent_count": deliveries.filter(
-                status=MailingDelivery.Status.SENT
-            ).count(),
-            "failed_count": deliveries.filter(
-                status=MailingDelivery.Status.FAILED
-            ).count(),
+            "sent_count": deliveries.filter(status=MailingDelivery.Status.SENT).count(),
+            "failed_count": deliveries.filter(status=MailingDelivery.Status.FAILED).count(),
         },
     )

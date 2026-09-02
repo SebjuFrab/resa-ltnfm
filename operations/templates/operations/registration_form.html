@@ -48,7 +48,14 @@
     </fieldset>
 
     <div class="actions">
-      <button type="submit">{% if registration %}Enregistrer et prévenir le professeur{% else %}Continuer vers les animations{% endif %}</button>
+      {% if registration %}
+        {% if registration.status == "CONFIRMED" %}
+          <button type="submit" name="action" value="save_and_notify">Enregistrer et prévenir le professeur</button>
+        {% endif %}
+        <button class="button-secondary" type="submit" name="action" value="save_without_notification">Enregistrer sans prévenir</button>
+      {% else %}
+        <button type="submit">Continuer vers les animations</button>
+      {% endif %}
       {% if registration %}<a class="button button-secondary" href="{% url 'operations:registration-detail' registration.reference %}">Annuler</a>{% endif %}
     </div>
   </form>

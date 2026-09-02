@@ -2,6 +2,13 @@
 {% block title %}Vérifier l’inscription — LTNM{% endblock %}
 {% block content %}
 <h1>Vérifier l’inscription</h1>
+{% if over_capacity_warnings %}
+  <div class="alert alert-warning" role="alert">
+    <p><strong>Attention : cette inscription dépasse la jauge.</strong></p>
+    <ul>{% for warning in over_capacity_warnings %}<li>{{ warning.session.animation.title }} à {{ warning.session.starts_at|time:"H:i" }} : {{ warning.projected_total }} personnes pour {{ warning.max_capacity }} places.</li>{% endfor %}</ul>
+    <p>Le dépassement est autorisé. La confirmation ci-dessous constitue la validation finale.</p>
+  </div>
+{% endif %}
 <dl>
   <dt>Établissement</dt><dd>{{ registration.institution.name }}</dd>
   <dt>Professeur</dt><dd>{{ registration.teacher }}</dd>
@@ -28,7 +35,7 @@
     </tbody>
   </table>
 </div>
-<p>Les périodes sans animation sont autorisées. Les accompagnateurs ne consomment pas les places des séances.</p>
+<p>Les périodes sans animation sont autorisées. La jauge tient compte des élèves et des accompagnateurs.</p>
 
 <form method="post" novalidate>
   {% csrf_token %}
@@ -40,4 +47,3 @@
   </div>
 </form>
 {% endblock %}
-

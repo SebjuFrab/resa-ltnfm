@@ -90,7 +90,7 @@ Ce contact peut être réutilisé. Le MVP ne conserve pas d’instantané sépar
 - `special_needs: TextField(blank=True)`
 - `comment: TextField(blank=True)`
 - `status: CharField(choices=DRAFT/CONFIRMED/CANCELLED, db_index=True)`
-- `draft_expires_at: DateTimeField(null=True, blank=True, db_index=True)` — une heure après la dernière sauvegarde réservant des places
+- `draft_expires_at: DateTimeField(null=True, blank=True, db_index=True)` — une heure après la dernière sauvegarde publique ; `NULL` pour un brouillon équipe qui réserve les places sans expiration
 - `edit_token_digest: CharField(64, unique=True, editable=False)` — SHA-256/HMAC du jeton, jamais le jeton brut
 - `token_created_at: DateTimeField`
 - `token_revoked_at: DateTimeField(null=True, blank=True)`
@@ -152,7 +152,7 @@ Le contrôle doit tenir compte de chevauchements partiels, pas seulement d’heu
 
 ### Cycle de vie
 
-- `DRAFT` : informations et choix modifiables, aucun courriel de confirmation. Les places sont maintenues pendant une heure après la dernière sauvegarde concernée ; après `draft_expires_at`, elles ne comptent plus dans la capacité et devront être revérifiées avant confirmation.
+- `DRAFT` : informations et choix modifiables, aucun courriel de confirmation. Les brouillons publics maintiennent les places pendant une heure après la dernière sauvegarde concernée. Un brouillon enregistré par l’équipe maintient les places sans expiration (`draft_expires_at=NULL`) jusqu’à sa confirmation, sa modification ou son annulation.
 - `CONFIRMED` : inscription validée ; modification possible jusqu’à la date limite.
 - `CANCELLED` : réservations actives annulées dans la même transaction, capacités immédiatement libérées.
 

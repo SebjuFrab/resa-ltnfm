@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from django.db.models import F, IntegerField, Q, Sum
 from django.db.models.functions import Coalesce
@@ -18,15 +19,14 @@ class SessionUnavailable(CapacityError):
         super().__init__(message)
 
 
-class CapacityExceeded(CapacityError):
-    def __init__(self, session, *, requested: int, available: int):
-        self.session = session
-        self.requested = requested
-        self.available = max(available, 0)
-        super().__init__(
-            f"Capacité insuffisante pour la séance {session.pk} : "
-            f"{requested} participant(s) demandé(s), {self.available} disponible(s)."
-        )
+@dataclass(frozen=True, slots=True)
+class CapacityWarning:
+    session: Session
+    requested: int
+    already_reserved: int
+    projected_total: int
+    max_capacity: int
+    excess: int
 
 
 def held_reservations(*, at=None):
@@ -34,9 +34,12 @@ def held_reservations(*, at=None):
     at = at or timezone.now()
     return Reservation.objects.filter(status=Reservation.Status.ACTIVE).filter(
         Q(registration__status=Registration.Status.CONFIRMED)
-        | Q(
-            registration__status=Registration.Status.DRAFT,
-            registration__draft_expires_at__gt=at,
+        | (
+            Q(registration__status=Registration.Status.DRAFT)
+            & (
+                Q(registration__draft_expires_at__isnull=True)
+                | Q(registration__draft_expires_at__gt=at)
+            )
         )
     )
 
@@ -93,15 +96,22 @@ def lock_sessions(session_ids) -> dict[int, Session]:
     return sessions
 
 
-def assert_capacity(
-    sessions: Mapping[int, Session],
+def capacity_warnings(
     requested_by_session: Mapping[int, int],
     *,
     excluding_registration_id=None,
     at=None,
-) -> None:
-    """Validate desired participant counts while the supplied sessions are locked."""
+) -> list[CapacityWarning]:
+    """Retourne les dépassements projetés sans bloquer l'inscription."""
+    if not requested_by_session:
+        return []
     at = at or timezone.now()
+    sessions = {
+        session.pk: session
+        for session in Session.objects.filter(pk__in=requested_by_session)
+        .select_related("animation")
+        .order_by("date", "starts_at", "pk")
+    }
     usage = held_reservations(at=at).filter(session_id__in=sessions)
     if excluding_registration_id is not None:
         usage = usage.exclude(registration_id=excluding_registration_id)
@@ -114,9 +124,30 @@ def assert_capacity(
             )
         )
     }
-    for session_id in sorted(requested_by_session):
-        session = sessions[session_id]
-        requested = requested_by_session[session_id]
-        available = session.max_capacity - totals.get(session_id, 0)
-        if requested > available:
-            raise CapacityExceeded(session, requested=requested, available=available)
+    warnings = []
+    for session_id, requested in requested_by_session.items():
+        session = sessions.get(session_id)
+        if session is None:
+            continue
+        already_reserved = totals.get(session_id, 0)
+        projected_total = already_reserved + requested
+        if projected_total <= session.max_capacity:
+            continue
+        warnings.append(
+            CapacityWarning(
+                session=session,
+                requested=requested,
+                already_reserved=already_reserved,
+                projected_total=projected_total,
+                max_capacity=session.max_capacity,
+                excess=projected_total - session.max_capacity,
+            )
+        )
+    return sorted(
+        warnings,
+        key=lambda warning: (
+            warning.session.date,
+            warning.session.starts_at,
+            warning.session.pk,
+        ),
+    )

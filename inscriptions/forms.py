@@ -58,12 +58,10 @@ class RegistrationIdentityForm(forms.Form):
         self.fields["existing_institution"].queryset = Institution.objects.order_by(
             "name", "postal_code"
         )
-        self.fields["institution_type"].choices = [
-            ("", "Sélectionner")
-        ] + list(Institution._meta.get_field("institution_type").choices)
-        self.fields["school_level"].queryset = SchoolLevel.objects.filter(
-            is_active=True
-        ).order_by(
+        self.fields["institution_type"].choices = [("", "Sélectionner")] + list(
+            Institution._meta.get_field("institution_type").choices
+        )
+        self.fields["school_level"].queryset = SchoolLevel.objects.filter(is_active=True).order_by(
             "sort_order", "label"
         )
         self.fields["visit_date"].choices = [
@@ -140,18 +138,11 @@ class PlanningForm(forms.Form):
             for reservation in registration.reservations.filter(status="ACTIVE")
         }
         for session in self.sessions:
-            current_count, current_chaperone_count = current.get(session.pk, (0, 0))
-            capacity_for_group = (
-                session.remaining_capacity
-                + current_count
-                + current_chaperone_count
-                - registration.chaperone_count
-            )
-            maximum = min(registration.student_count, max(0, capacity_for_group))
+            current_count, _current_chaperone_count = current.get(session.pk, (0, 0))
             field = forms.IntegerField(
                 label=f"Élèves pour {session.animation.title} à {session.starts_at:%H:%M}",
                 min_value=0,
-                max_value=max(0, maximum),
+                max_value=registration.student_count,
                 required=False,
                 initial=current_count,
                 disabled=session.status != Session.Status.OPEN and current_count == 0,
@@ -215,6 +206,4 @@ class ConfirmationForm(forms.Form):
 
 
 class CancellationForm(forms.Form):
-    confirm = forms.BooleanField(
-        label="Je confirme l’annulation complète de cette inscription."
-    )
+    confirm = forms.BooleanField(label="Je confirme l’annulation complète de cette inscription.")

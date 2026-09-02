@@ -28,7 +28,7 @@ from inscriptions.models import (
     Teacher,
 )
 from inscriptions.security import rate_limit
-from inscriptions.services.capacity import CapacityError
+from inscriptions.services.capacity import CapacityError, capacity_warnings
 from inscriptions.services.registration import (
     RegistrationError,
     ReservationRequest,
@@ -59,9 +59,7 @@ def _remember_reference(request, key, reference):
 
 def _forget_reference(request, key, reference):
     value = str(reference)
-    request.session[key] = [
-        item for item in request.session.get(key, []) if item != value
-    ]
+    request.session[key] = [item for item in request.session.get(key, []) if item != value]
 
 
 def _owned_draft(request, reference):
@@ -83,10 +81,7 @@ def _managed_registration(request):
         reference=access["reference"],
     )
     current_version = registration.token_created_at.isoformat()
-    if (
-        registration.token_revoked_at is not None
-        or access.get("token_version") != current_version
-    ):
+    if registration.token_revoked_at is not None or access.get("token_version") != current_version:
         request.session.pop(MANAGED_SESSION_KEY, None)
         raise PermissionDenied("Votre accès a été révoqué. Utilisez le dernier lien reçu.")
     return registration
@@ -137,6 +132,22 @@ def _merge_reservation_requests(registration, displayed_sessions, submitted_coun
     ]
 
 
+def _over_capacity_warnings(registration, reservation_requests):
+    return capacity_warnings(
+        {
+            reservation.session_id: reservation.total_participant_count
+            for reservation in reservation_requests
+        },
+        excluding_registration_id=registration.pk,
+    )
+
+
+def _over_capacity_needs_confirmation(request, registration, reservation_requests):
+    warnings = _over_capacity_warnings(registration, reservation_requests)
+    needs_confirmation = bool(warnings) and request.POST.get("confirm_over_capacity") != "yes"
+    return warnings, needs_confirmation
+
+
 def _planning_context(request, registration, *, action_url):
     filter_form = PlanningFilterForm(request.GET or None)
     sessions = filter_form.apply(_registration_sessions(registration))
@@ -145,13 +156,18 @@ def _planning_context(request, registration, *, action_url):
         registration=registration,
         sessions=sessions,
     )
-    return filter_form, sessions, planning_form, {
-        "registration": registration,
-        "filter_form": filter_form,
-        "planning_form": planning_form,
-        "session_rows": list(zip(sessions, planning_form, strict=True)),
-        "action_url": action_url,
-    }
+    return (
+        filter_form,
+        sessions,
+        planning_form,
+        {
+            "registration": registration,
+            "filter_form": filter_form,
+            "planning_form": planning_form,
+            "session_rows": list(zip(sessions, planning_form, strict=True)),
+            "action_url": action_url,
+        },
+    )
 
 
 @sensitive_variables("token")
@@ -241,9 +257,14 @@ def draft_planning(request, reference):
         action_url=reverse("registration-planning", kwargs={"reference": reference}),
     )
     if request.method == "POST" and form.is_valid():
-        requests = _merge_reservation_requests(
-            registration, sessions, form.submitted_counts()
+        requests = _merge_reservation_requests(registration, sessions, form.submitted_counts())
+        warnings, needs_confirmation = _over_capacity_needs_confirmation(
+            request, registration, requests
         )
+        if needs_confirmation:
+            context["over_capacity_warnings"] = warnings
+            context["session_rows"] = list(zip(sessions, form, strict=True))
+            return render(request, "inscriptions/planning.html", context)
         try:
             save_draft(registration, reservation_requests=requests)
         except (RegistrationError, CapacityError) as error:
@@ -265,12 +286,21 @@ def draft_review(request, reference):
         status=Reservation.Status.ACTIVE
     ).select_related("session", "session__animation")
     form = ConfirmationForm(request.POST or None)
+    over_capacity_warnings = _over_capacity_warnings(
+        registration,
+        [
+            ReservationRequest(
+                session_id=reservation.session_id,
+                student_count=reservation.student_count,
+                chaperone_count=reservation.chaperone_count,
+            )
+            for reservation in reservations
+        ],
+    )
     if request.method == "POST" and form.is_valid():
         try:
             registration = confirm_registration(registration)
-            _schedule_email_with_rotated_link(
-                request, registration, EmailLog.Kind.CONFIRMATION
-            )
+            _schedule_email_with_rotated_link(request, registration, EmailLog.Kind.CONFIRMATION)
         except (RegistrationError, CapacityError) as error:
             form.add_error(None, str(error))
         else:
@@ -281,16 +311,19 @@ def draft_review(request, reference):
     return render(
         request,
         "inscriptions/review.html",
-        {"registration": registration, "reservations": reservations, "form": form},
+        {
+            "registration": registration,
+            "reservations": reservations,
+            "form": form,
+            "over_capacity_warnings": over_capacity_warnings,
+        },
     )
 
 
 def registration_complete(request, reference):
     allowed = str(reference) in request.session.get(COMPLETED_SESSION_KEY, [])
     managed = request.session.get(MANAGED_SESSION_KEY, {})
-    allowed = allowed or (
-        isinstance(managed, dict) and managed.get("reference") == str(reference)
-    )
+    allowed = allowed or (isinstance(managed, dict) and managed.get("reference") == str(reference))
     if not allowed:
         raise Http404
     registration = get_object_or_404(
@@ -402,9 +435,7 @@ def manage_details(request):
                         actor_kind=RegistrationEvent.ActorKind.TEACHER,
                         changes={"teacher_fields": sorted(changed_teacher_fields)},
                     )
-                _schedule_email_with_rotated_link(
-                    request, registration, EmailLog.Kind.MODIFICATION
-                )
+                _schedule_email_with_rotated_link(request, registration, EmailLog.Kind.MODIFICATION)
         except (RegistrationError, CapacityError) as error:
             form.add_error(None, str(error))
         else:
@@ -428,16 +459,18 @@ def manage_planning(request):
         action_url=reverse("registration-manage-planning"),
     )
     if request.method == "POST" and form.is_valid():
-        requests = _merge_reservation_requests(
-            registration, sessions, form.submitted_counts()
+        requests = _merge_reservation_requests(registration, sessions, form.submitted_counts())
+        warnings, needs_confirmation = _over_capacity_needs_confirmation(
+            request, registration, requests
         )
+        if needs_confirmation:
+            context["over_capacity_warnings"] = warnings
+            context["management_mode"] = True
+            context["session_rows"] = list(zip(sessions, form, strict=True))
+            return render(request, "inscriptions/planning.html", context)
         try:
-            registration = update_registration(
-                registration, reservation_requests=requests
-            )
-            _schedule_email_with_rotated_link(
-                request, registration, EmailLog.Kind.MODIFICATION
-            )
+            registration = update_registration(registration, reservation_requests=requests)
+            _schedule_email_with_rotated_link(request, registration, EmailLog.Kind.MODIFICATION)
         except (RegistrationError, CapacityError) as error:
             form.add_error(None, str(error))
         else:

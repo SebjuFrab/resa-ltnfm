@@ -30,6 +30,18 @@
   <form class="planning-form" method="post" action="{{ action_url }}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" data-filter-draft data-unfiltered-action="{{ planning_post_url }}" novalidate>
     {% csrf_token %}
     {{ planning_form.non_field_errors }}
+    {% if over_capacity_warnings %}
+      <section class="alert alert-warning" role="alert">
+        <h2>Attention : la jauge sera dépassée</h2>
+        <p>Le dépassement est autorisé, mais contrôlez les effectifs avant de confirmer une seconde fois.</p>
+        <ul>
+          {% for warning in over_capacity_warnings %}
+            <li><strong>{{ warning.session.animation.title }}</strong> à {{ warning.session.starts_at|time:"H:i" }} : {{ warning.projected_total }} personnes pour une jauge de {{ warning.max_capacity }} (dépassement de {{ warning.excess }}).</li>
+          {% endfor %}
+        </ul>
+        <label><input type="checkbox" name="confirm_over_capacity" value="yes" required> Je confirme vouloir dépasser la jauge.</label>
+      </section>
+    {% endif %}
     <div class="cards session-grid planning-session-grid" data-layout="compact-grid">
       {% for row in session_rows %}
         {% with session=row.0 student_field=row.1 chaperone_field=row.2 can_fill_full=row.3 allocation_editable=row.4 removal_required=row.5 %}
@@ -40,6 +52,7 @@
             <p class="planning-card-levels"><strong>Catégorie :</strong> {{ session.animation.get_venue_category_display|default:"À renseigner" }} · <strong>Thématiques :</strong> {% for theme in session.animation.themes.all %}{{ theme }}{% if not forloop.last %}, {% endif %}{% empty %}À renseigner{% endfor %}</p>
             {% if session.animation.recommended_levels.exists %}<p class="planning-card-levels"><strong>Niveaux :</strong> {% for level in session.animation.recommended_levels.all %}{{ level }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
             <p id="capacity-{{ session.pk }}" class="capacity"><strong>{{ session.remaining_capacity }}</strong> place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }} sur {{ session.max_capacity }}</p>
+            <p class="helptext">La jauge est indicative : son dépassement reste possible après confirmation.</p>
             <div class="session-allocation" role="group" aria-labelledby="allocation-title-{{ session.pk }}">
               <p id="allocation-title-{{ session.pk }}" class="session-allocation-title">Participants à inscrire</p>
               {% if removal_required %}<p class="alert alert-warning">Cette animation n’est plus disponible. Utilisez « Retirer » pour supprimer sa réservation actuelle.</p>{% endif %}
@@ -57,7 +70,7 @@
                   data-chaperone-target="{{ chaperone_field.id_for_label }}"
                   data-student-count="{{ registration.student_count }}"
                   data-chaperone-count="{{ registration.chaperone_count }}"
-                  {% if not can_fill_full %}disabled title="La capacité disponible ne permet pas d’inscrire tout le groupe."{% endif %}
+                  {% if not can_fill_full %}disabled{% endif %}
                 >Tout le groupe ({{ registration.total_participant_count }})</button>
                 <button
                   type="button"
@@ -75,7 +88,13 @@
     </div>
 
     <div class="actions">
-      <button type="submit">{% if is_rescheduling %}Enregistrer les modifications{% elif registration.status == "DRAFT" %}Vérifier l’inscription{% else %}Enregistrer et prévenir le professeur{% endif %}</button>
+      {% if registration.status == "DRAFT" %}
+        <button type="submit" name="action" value="continue_to_review">{% if over_capacity_warnings %}Confirmer le dépassement et vérifier{% else %}Vérifier l’inscription{% endif %}</button>
+        <button class="button-secondary" type="submit" name="action" value="save_draft">{% if over_capacity_warnings %}Confirmer le dépassement et {% endif %}Enregistrer le brouillon sans prévenir</button>
+      {% else %}
+        <button type="submit" name="action" value="save_and_notify">{% if over_capacity_warnings %}Confirmer le dépassement, enregistrer et prévenir{% else %}Enregistrer et prévenir le professeur{% endif %}</button>
+        <button class="button-secondary" type="submit" name="action" value="save_without_notification">{% if over_capacity_warnings %}Confirmer le dépassement et {% endif %}Enregistrer sans prévenir</button>
+      {% endif %}
       {% if is_rescheduling %}
         <button class="button-secondary" type="submit" name="action" value="cancel-reschedule" formnovalidate>Abandonner les modifications</button>
       {% else %}

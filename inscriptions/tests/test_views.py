@@ -201,6 +201,50 @@ class PublicRegistrationViewTests(TestCase):
         self.assertEqual(complete_response.status_code, 200)
         self.assertContains(complete_response, registration.group_name)
 
+    def test_over_capacity_planning_requires_warning_then_final_confirmation(self):
+        Session.objects.filter(pk=self.open_session.pk).update(max_capacity=20)
+        _response, registration = self.start_draft(group_name="CM2 surcharge")
+        planning_url = reverse(
+            "registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+        payload = {f"session_{self.open_session.pk}": "18"}
+
+        warning_response = self.client.post(planning_url, payload)
+
+        self.assertEqual(warning_response.status_code, 200)
+        self.assertContains(warning_response, "Attention : la jauge sera dépassée")
+        self.assertContains(warning_response, 'name="confirm_over_capacity"')
+        self.assertFalse(registration.reservations.exists())
+
+        payload["confirm_over_capacity"] = "yes"
+        save_response = self.client.post(planning_url, payload)
+        review_url = reverse(
+            "registration-review",
+            kwargs={"reference": registration.reference},
+        )
+        self.assertRedirects(save_response, review_url, fetch_redirect_response=False)
+        reservation = registration.reservations.get(status=Reservation.Status.ACTIVE)
+        self.assertEqual(reservation.total_participant_count, 21)
+
+        review_response = self.client.get(review_url)
+        self.assertContains(review_response, "cette inscription dépasse la jauge")
+        self.assertContains(review_response, "validation finale")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            confirmation_response = self.client.post(review_url, {"confirm": "on"})
+
+        self.assertRedirects(
+            confirmation_response,
+            reverse(
+                "registration-complete",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
+        registration.refresh_from_db()
+        self.assertEqual(registration.status, Registration.Status.CONFIRMED)
+
     def test_valid_edit_link_only_grants_access_to_its_registration(self):
         first = self.create_service_draft(group_name="Groupe autorisé")
         second = self.create_service_draft(group_name="Groupe non autorisé")

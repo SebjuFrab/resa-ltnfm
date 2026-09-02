@@ -13,8 +13,8 @@ from inscriptions.models import (
     Teacher,
 )
 from inscriptions.services.capacity import (
-    CapacityExceeded,
     SessionUnavailable,
+    capacity_warnings,
     reserved_participant_count,
     reserved_student_count,
 )
@@ -113,7 +113,7 @@ class RegistrationServiceTests(TestCase):
             10,
         )
 
-    def test_chaperone_increase_is_checked_and_rolled_back(self):
+    def test_chaperone_increase_can_exceed_capacity(self):
         session = self.session(time(9), time(10), capacity=10)
         first = self.draft(
             [ReservationRequest(session.pk, 5, chaperone_count=1)],
@@ -126,16 +126,16 @@ class RegistrationServiceTests(TestCase):
             chaperone_count=0,
         )
 
-        with self.assertRaises(CapacityExceeded):
-            update_registration(
-                first.registration,
-                reservation_requests=[ReservationRequest(session.pk, 5, chaperone_count=3)],
-                chaperone_count=3,
-                at=self.now + timedelta(minutes=5),
-            )
+        update_registration(
+            first.registration,
+            reservation_requests=[ReservationRequest(session.pk, 5, chaperone_count=3)],
+            chaperone_count=3,
+            at=self.now + timedelta(minutes=5),
+        )
 
         reservation = first.registration.reservations.get(status=Reservation.Status.ACTIVE)
-        self.assertEqual(reservation.chaperone_count, 1)
+        self.assertEqual(reservation.chaperone_count, 3)
+        self.assertEqual(reserved_participant_count(session, at=self.now), 11)
 
     def test_overlapping_sessions_check_chaperones_separately(self):
         first = self.session(time(9), time(10), capacity=30)
@@ -151,30 +151,34 @@ class RegistrationServiceTests(TestCase):
                 chaperone_count=1,
             )
 
-    def test_capacity_overrun_rolls_back_second_draft(self):
+    def test_capacity_overrun_is_allowed_and_reported_as_a_warning(self):
         session = self.session(time(9), time(10), capacity=10)
         self.draft([ReservationRequest(session.pk, 6)], student_count=6)
 
-        with self.assertRaises(CapacityExceeded):
-            self.draft([ReservationRequest(session.pk, 5)], student_count=5)
+        warnings = capacity_warnings({session.pk: 5}, at=self.now)
+        second = self.draft([ReservationRequest(session.pk, 5)], student_count=5)
 
-        self.assertEqual(Registration.objects.count(), 1)
-        self.assertEqual(reserved_student_count(session, at=self.now), 6)
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].projected_total, 11)
+        self.assertEqual(warnings[0].excess, 1)
+        self.assertIsNotNone(second.registration.pk)
+        self.assertEqual(Registration.objects.count(), 2)
+        self.assertEqual(reserved_student_count(session, at=self.now), 11)
 
-    def test_capacity_is_rechecked_when_reservation_is_modified(self):
+    def test_reservation_can_be_modified_beyond_capacity(self):
         session = self.session(time(9), time(10), capacity=10)
         first = self.draft([ReservationRequest(session.pk, 6)], student_count=10)
         self.draft([ReservationRequest(session.pk, 4)], student_count=4)
 
-        with self.assertRaises(CapacityExceeded):
-            update_registration(
-                first.registration,
-                reservation_requests=[ReservationRequest(session.pk, 7)],
-                at=self.now + timedelta(minutes=5),
-            )
+        update_registration(
+            first.registration,
+            reservation_requests=[ReservationRequest(session.pk, 7)],
+            at=self.now + timedelta(minutes=5),
+        )
 
         reservation = first.registration.reservations.get(status=Reservation.Status.ACTIVE)
-        self.assertEqual(reservation.student_count, 6)
+        self.assertEqual(reservation.student_count, 7)
+        self.assertEqual(reserved_student_count(session, at=self.now), 11)
 
     def test_cancel_releases_capacity_and_revokes_token(self):
         session = self.session(time(9), time(10), capacity=10)
@@ -258,17 +262,17 @@ class RegistrationServiceTests(TestCase):
                 at=self.now,
             )
 
-    def test_confirming_expired_draft_must_reacquire_capacity(self):
+    def test_confirming_expired_draft_can_exceed_capacity(self):
         session = self.session(time(9), time(10), capacity=10)
         expired = self.draft([ReservationRequest(session.pk, 10)], student_count=10)
         later = self.now + timedelta(hours=2)
         self.draft([ReservationRequest(session.pk, 10)], student_count=10, at=later)
 
-        with self.assertRaises(CapacityExceeded):
-            confirm_registration(expired.registration, at=later)
+        confirm_registration(expired.registration, at=later)
 
         expired.registration.refresh_from_db()
-        self.assertEqual(expired.registration.status, Registration.Status.DRAFT)
+        self.assertEqual(expired.registration.status, Registration.Status.CONFIRMED)
+        self.assertEqual(reserved_student_count(session, at=later), 20)
 
     def test_confirmation_is_atomic_and_audited(self):
         session = self.session(time(9), time(10), capacity=10)

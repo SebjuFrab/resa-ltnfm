@@ -120,9 +120,12 @@ class SessionQuerySet(models.QuerySet):
         at = at or timezone.now()
         active_holds = Q(reservations__status="ACTIVE") & (
             Q(reservations__registration__status="CONFIRMED")
-            | Q(
-                reservations__registration__status="DRAFT",
-                reservations__registration__draft_expires_at__gt=at,
+            | (
+                Q(reservations__registration__status="DRAFT")
+                & (
+                    Q(reservations__registration__draft_expires_at__isnull=True)
+                    | Q(reservations__registration__draft_expires_at__gt=at)
+                )
             )
         )
         reserved = Coalesce(
@@ -218,9 +221,12 @@ class Session(models.Model):
             self.reservations.filter(status="ACTIVE")
             .filter(
                 Q(registration__status="CONFIRMED")
-                | Q(
-                    registration__status="DRAFT",
-                    registration__draft_expires_at__gt=at,
+                | (
+                    Q(registration__status="DRAFT")
+                    & (
+                        Q(registration__draft_expires_at__isnull=True)
+                        | Q(registration__draft_expires_at__gt=at)
+                    )
                 )
             )
             .aggregate(
@@ -252,5 +258,4 @@ class Session(models.Model):
         return (
             self.status == self.Status.OPEN
             and self.animation.is_active
-            and self.remaining_capacity > 0
         )

@@ -14,7 +14,6 @@ from inscriptions.codes import generate_unique_group_code, normalize_group_code
 from inscriptions.models import Institution, Registration, RegistrationEvent, Reservation, Teacher
 from inscriptions.services.capacity import (
     SessionUnavailable,
-    assert_capacity,
     lock_sessions,
 )
 from inscriptions.services.tokens import issue_token
@@ -180,10 +179,6 @@ def _assert_program(sessions, requests, *, student_count: int, chaperone_count: 
     )
 
 
-def _requested_capacities(requests):
-    return {session_id: request.total_participant_count for session_id, request in requests.items()}
-
-
 def _snapshot_requests(active_reservations):
     return {
         reservation.session_id: ReservationRequest(
@@ -304,8 +299,6 @@ def create_draft(
         student_count=student_count,
         chaperone_count=chaperone_count,
     )
-    assert_capacity(sessions, _requested_capacities(requests), at=at)
-
     token = issue_token()
     registration = _create_registration(
         institution=institution,
@@ -321,7 +314,11 @@ def create_draft(
         level_comment=level_comment,
         comment=comment,
         status=Registration.Status.DRAFT,
-        draft_expires_at=at + timedelta(minutes=settings.DRAFT_HOLD_MINUTES),
+        draft_expires_at=(
+            None
+            if actor_kind == RegistrationEvent.ActorKind.STAFF
+            else at + timedelta(minutes=settings.DRAFT_HOLD_MINUTES)
+        ),
         edit_token_digest=token.digest,
         token_created_at=at,
     )
@@ -433,13 +430,6 @@ def update_registration(
         student_count=field_values["student_count"],
         chaperone_count=field_values["chaperone_count"],
     )
-    assert_capacity(
-        sessions,
-        _requested_capacities(requests),
-        excluding_registration_id=registration.pk,
-        at=at,
-    )
-
     old_values = {
         "institution_id": registration.institution_id,
         "teacher_id": registration.teacher_id,
@@ -457,7 +447,11 @@ def update_registration(
     for field, value in field_values.items():
         setattr(registration, field, value)
     if registration.status == Registration.Status.DRAFT:
-        registration.draft_expires_at = at + timedelta(minutes=settings.DRAFT_HOLD_MINUTES)
+        registration.draft_expires_at = (
+            None
+            if actor_kind == RegistrationEvent.ActorKind.STAFF
+            else at + timedelta(minutes=settings.DRAFT_HOLD_MINUTES)
+        )
     try:
         with transaction.atomic():
             registration.save()
@@ -550,12 +544,6 @@ def confirm_registration(
         requests,
         student_count=registration.student_count,
         chaperone_count=registration.chaperone_count,
-    )
-    assert_capacity(
-        sessions,
-        _requested_capacities(requests),
-        excluding_registration_id=registration.pk,
-        at=at,
     )
     registration.status = Registration.Status.CONFIRMED
     registration.draft_expires_at = None

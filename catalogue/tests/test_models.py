@@ -230,3 +230,43 @@ class SessionCapacityTests(TestCase):
 
         self.assertEqual(session.reserved_capacity, 15)
         self.assertEqual(session.remaining_capacity, 15)
+
+    def test_staff_draft_without_expiration_keeps_holding_capacity(self):
+        draft = self.make_registration(
+            "persistent",
+            status=Registration.Status.DRAFT,
+            draft_expires_at=None,
+        )
+        Reservation.objects.create(
+            registration=draft,
+            session=self.session,
+            student_count=12,
+            chaperone_count=3,
+        )
+
+        session = Session.objects.with_capacities(
+            at=timezone.now() + timedelta(days=365)
+        ).get(pk=self.session.pk)
+
+        self.assertTrue(draft.is_draft_hold_active)
+        self.assertEqual(session.reserved_capacity, 15)
+        self.assertEqual(session.remaining_capacity, 15)
+
+    def test_full_session_remains_bookable_for_an_explicit_overbooking(self):
+        first = self.make_registration("7", status=Registration.Status.CONFIRMED)
+        second = self.make_registration("8", status=Registration.Status.CONFIRMED)
+        Reservation.objects.create(
+            registration=first,
+            session=self.session,
+            student_count=20,
+        )
+        Reservation.objects.create(
+            registration=second,
+            session=self.session,
+            student_count=10,
+        )
+
+        session = Session.objects.get(pk=self.session.pk)
+
+        self.assertEqual(session.remaining_capacity, 0)
+        self.assertTrue(session.is_bookable)

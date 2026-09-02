@@ -166,6 +166,77 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertNotIn("lien de modification", mail.outbox[0].body.lower())
 
+    def test_staff_can_save_a_persistent_draft_that_holds_places_without_email(self):
+        self.client.post(
+            reverse("operations:registration-create"),
+            self.registration_payload(),
+        )
+        registration = Registration.objects.get(group_code="truffe-doree")
+        planning_url = reverse(
+            "operations:registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+        payload = self.planning_payload(self.session)
+        payload["action"] = "save_draft"
+
+        response = self.client.post(planning_url, payload)
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "operations:registration-detail",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
+        registration.refresh_from_db()
+        self.assertEqual(registration.status, Registration.Status.DRAFT)
+        self.assertIsNone(registration.draft_expires_at)
+        self.assertEqual(
+            registration.reservations.get(status=Reservation.Status.ACTIVE).total_participant_count,
+            26,
+        )
+        future_session = Session.objects.with_capacities(
+            at=timezone.now() + timedelta(days=365)
+        ).get(pk=self.session.pk)
+        self.assertEqual(future_session.remaining_capacity, 14)
+        self.assertEqual(EmailLog.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_staff_can_leave_review_as_a_draft_without_email(self):
+        self.client.post(
+            reverse("operations:registration-create"),
+            self.registration_payload(),
+        )
+        registration = Registration.objects.get(group_code="truffe-doree")
+        self.client.post(
+            reverse(
+                "operations:registration-planning",
+                kwargs={"reference": registration.reference},
+            ),
+            self.planning_payload(self.session),
+        )
+        review_url = reverse(
+            "operations:registration-review",
+            kwargs={"reference": registration.reference},
+        )
+
+        response = self.client.post(review_url, {"action": "save_draft"})
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "operations:registration-detail",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
+        registration.refresh_from_db()
+        self.assertEqual(registration.status, Registration.Status.DRAFT)
+        self.assertTrue(registration.reservations.filter(status="ACTIVE").exists())
+        self.assertEqual(EmailLog.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
     def test_staff_can_split_students_and_chaperones_between_overlapping_sessions(self):
         second_session = Session.objects.create(
             animation=self.animation,
@@ -259,7 +330,7 @@ class InternalRegistrationWorkflowTests(TestCase):
         )
         self.assertEqual(self.session.remaining_capacity, 29)
 
-    def test_partial_allocation_checks_combined_capacity(self):
+    def test_partial_allocation_requires_an_over_capacity_confirmation(self):
         self.session.max_capacity = 10
         self.session.save(update_fields=("max_capacity", "updated_at"))
         self.client.post(
@@ -277,8 +348,24 @@ class InternalRegistrationWorkflowTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "ne dispose que de 10 place")
+        self.assertContains(response, "Attention : la jauge sera dépassée")
+        self.assertContains(response, 'name="confirm_over_capacity"')
         self.assertFalse(registration.reservations.exists())
+
+        payload = self.planning_payload(self.session, students=9, chaperones=2)
+        payload["confirm_over_capacity"] = "yes"
+        response = self.client.post(planning_url, payload)
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "operations:registration-review",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
+        reservation = registration.reservations.get(status=Reservation.Status.ACTIVE)
+        self.assertEqual(reservation.total_participant_count, 11)
 
     def test_filtered_planning_preserves_hidden_partial_allocation(self):
         self.client.post(
@@ -541,8 +628,8 @@ class InternalRegistrationWorkflowTests(TestCase):
         student_field = planning_form.fields[
             StaffPlanningForm.student_field_name(self.session.pk)
         ]
-        self.assertEqual(student_field.max_value, 10)
-        self.assertFalse(response.context["session_rows"][0][3])
+        self.assertEqual(student_field.max_value, 24)
+        self.assertTrue(response.context["session_rows"][0][3])
 
     def test_contact_update_preserves_partial_allocations(self):
         registration = self.create_and_confirm_registration()
@@ -609,6 +696,109 @@ class InternalRegistrationWorkflowTests(TestCase):
         )
         edit_form = StaffRegistrationForm(data={}, registration=registration)
         self.assertIn(inactive_level, edit_form.fields["school_level"].queryset)
+
+    def test_staff_can_update_group_details_without_notifying_teacher(self):
+        registration = self.create_and_confirm_registration()
+        mail.outbox.clear()
+        payload = self.registration_payload(
+            existing_institution=str(registration.institution_id),
+            institution_name="",
+            institution_city="",
+            institution_department="",
+            comment="Note interne corrigée sans envoi.",
+        )
+        payload["action"] = "save_without_notification"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse(
+                    "operations:registration-update",
+                    kwargs={"reference": registration.reference},
+                ),
+                payload,
+            )
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "operations:registration-detail",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
+        registration.refresh_from_db()
+        self.assertEqual(registration.comment, "Note interne corrigée sans envoi.")
+        self.assertEqual(EmailLog.objects.filter(kind="MODIFICATION").count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_staff_can_update_animations_without_notifying_teacher(self):
+        registration = self.create_and_confirm_registration()
+        mail.outbox.clear()
+        planning_url = reverse(
+            "operations:registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+        payload = self.planning_payload(self.session, students=20, chaperones=2)
+        payload["action"] = "save_without_notification"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(planning_url, payload)
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "operations:registration-detail",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
+        reservation = registration.reservations.get(status=Reservation.Status.ACTIVE)
+        self.assertEqual((reservation.student_count, reservation.chaperone_count), (20, 2))
+        self.assertEqual(EmailLog.objects.filter(kind="MODIFICATION").count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_staff_effectif_update_keeps_the_without_notification_choice(self):
+        registration = self.create_and_confirm_registration()
+        mail.outbox.clear()
+        payload = self.registration_payload(
+            existing_institution=str(registration.institution_id),
+            institution_name="",
+            institution_city="",
+            institution_department="",
+            student_count="20",
+            chaperone_count="3",
+        )
+        payload["action"] = "save_without_notification"
+        self.client.post(
+            reverse(
+                "operations:registration-update",
+                kwargs={"reference": registration.reference},
+            ),
+            payload,
+        )
+        planning_url = reverse(
+            "operations:registration-planning",
+            kwargs={"reference": registration.reference},
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{planning_url}?reschedule=1",
+                self.planning_payload(self.session, students=18, chaperones=2),
+            )
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "operations:registration-detail",
+                kwargs={"reference": registration.reference},
+            ),
+            fetch_redirect_response=False,
+        )
+        registration.refresh_from_db()
+        self.assertEqual((registration.student_count, registration.chaperone_count), (20, 3))
+        self.assertEqual(EmailLog.objects.filter(kind="MODIFICATION").count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_staff_update_reallocates_reservations_and_notifies_teacher(self):
         registration = self.create_and_confirm_registration()

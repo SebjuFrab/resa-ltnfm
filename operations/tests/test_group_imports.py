@@ -127,7 +127,7 @@ class GroupImportTests(TestCase):
         self.assertEqual(len(created), 1)
         registration = Registration.objects.get(pk=created[0].pk)
         self.assertEqual(registration.status, Registration.Status.DRAFT)
-        self.assertIsNotNone(registration.draft_expires_at)
+        self.assertIsNone(registration.draft_expires_at)
         self.assertIsNone(registration.confirmed_at)
         self.assertEqual(registration.group_code, group_code)
         self.assertEqual(registration.group_name, group_code)

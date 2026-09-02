@@ -19,6 +19,18 @@
 <form method="post" action="{{ action_url }}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" novalidate>
   {% csrf_token %}
   {{ planning_form.non_field_errors }}
+  {% if over_capacity_warnings %}
+    <section class="alert alert-warning" role="alert">
+      <h2>Attention : la jauge sera dépassée</h2>
+      <p>Le dépassement est autorisé, mais vérifiez les effectifs avant de continuer.</p>
+      <ul>
+        {% for warning in over_capacity_warnings %}
+          <li><strong>{{ warning.session.animation.title }}</strong> à {{ warning.session.starts_at|time:"H:i" }} : {{ warning.projected_total }} personnes pour une jauge de {{ warning.max_capacity }} (dépassement de {{ warning.excess }}).</li>
+        {% endfor %}
+      </ul>
+      <label><input type="checkbox" name="confirm_over_capacity" value="yes" required> Je confirme vouloir dépasser la jauge.</label>
+    </section>
+  {% endif %}
   {% regroup session_rows by 0.starts_at as time_groups %}
   {% for time_group in time_groups %}
     <section aria-labelledby="time-{{ forloop.counter }}">
@@ -26,7 +38,7 @@
       <div class="cards session-grid">
         {% for row in time_group.list %}
           {% with session=row.0 field=row.1 %}
-          <article class="card{% if session.remaining_capacity == 0 %} session-full{% endif %}">
+          <article class="card">
             <h3>{{ session.animation.title }}</h3>
             <p>{{ session.starts_at|time:"H:i" }}–{{ session.ends_at|time:"H:i" }} · {{ session.location }}</p>
             <p>{{ session.animation.short_description }}</p>
@@ -35,6 +47,7 @@
             {% endif %}
             {% if session.animation.accessibility %}<p><strong>Accessibilité :</strong> {{ session.animation.accessibility }}</p>{% endif %}
             <p id="capacity-{{ session.pk }}"><strong>{{ session.remaining_capacity }} place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }}</strong> sur {{ session.max_capacity }}</p>
+            <p class="helptext">La jauge est indicative : son dépassement reste possible après confirmation.</p>
             {% if session.status == "OPEN" %}
               {{ field.label_tag }} {{ field }} {{ field.errors }}
             {% else %}
@@ -52,7 +65,7 @@
     <p class="alert alert-warning">Aucune séance n’est programmée pour ce jour avec ces filtres.</p>
   {% endfor %}
   <div class="actions">
-    <button type="submit">Enregistrer le planning</button>
+    <button type="submit">{% if over_capacity_warnings %}Confirmer le dépassement{% else %}Enregistrer le planning{% endif %}</button>
     {% if management_mode %}
       <a class="button button-secondary" href="{% url 'registration-manage' %}">Retour au récapitulatif</a>
     {% else %}

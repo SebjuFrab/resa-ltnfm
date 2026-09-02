@@ -12,10 +12,15 @@
     <p class="status-badge status-{{ registration.status|lower }}">{{ registration.get_status_display }}</p>
   </div>
 
+  {% if registration.status == "DRAFT" and reservations %}
+    <p class="alert"><strong>Brouillon enregistré :</strong> les places ci-dessous restent réservées sans limite de temps et aucun courriel n’a été envoyé au professeur.</p>
+  {% endif %}
+
   <div class="actions">
     {% if registration.status != "CANCELLED" and can_manage_registrations %}
       <a class="button" href="{% url 'operations:registration-update' registration.reference %}">Modifier la fiche</a>
       <a class="button" href="{% url 'operations:registration-planning' registration.reference %}">{% if registration.status == "DRAFT" %}Choisir les animations{% else %}Modifier les animations{% endif %}</a>
+      {% if registration.status == "DRAFT" and reservations %}<a class="button button-secondary" href="{% url 'operations:registration-review' registration.reference %}">Vérifier et confirmer</a>{% endif %}
       {% if registration.status == "CONFIRMED" %}
         <form method="post" action="{% url 'operations:registration-resend' registration.reference %}">{% csrf_token %}<button class="button-secondary" type="submit">Renvoyer le récapitulatif</button></form>
       {% endif %}

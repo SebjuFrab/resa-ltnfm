@@ -184,8 +184,6 @@ class Registration(models.Model):
             teacher_institution_id = getattr(self.teacher, "institution_id", None)
             if teacher_institution_id != self.institution_id:
                 errors["teacher"] = "Le professeur doit appartenir à l'établissement choisi."
-        if self.status == self.Status.DRAFT and self.draft_expires_at is None:
-            errors["draft_expires_at"] = "Un brouillon doit avoir une date d'expiration."
         if self.status != self.Status.DRAFT and self.draft_expires_at is not None:
             errors["draft_expires_at"] = (
                 "La date d'expiration est réservée aux inscriptions en brouillon."
@@ -197,8 +195,10 @@ class Registration(models.Model):
     def is_draft_hold_active(self):
         return (
             self.status == self.Status.DRAFT
-            and self.draft_expires_at is not None
-            and self.draft_expires_at > timezone.now()
+            and (
+                self.draft_expires_at is None
+                or self.draft_expires_at > timezone.now()
+            )
         )
 
     @property

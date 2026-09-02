@@ -4,7 +4,6 @@ from pathlib import Path
 from django import forms
 from django.conf import settings
 from django.db.models import Q
-from django.utils import timezone
 
 from catalogue.models import Animation, SchoolLevel, Session, Theme
 from inscriptions.choices import department_form_choices
@@ -35,8 +34,7 @@ class GroupImportForm(forms.Form):
     file = forms.FileField(
         label="Fichier CSV des groupes",
         help_text=(
-            "UTF-8 ou Windows-1252, séparateur point-virgule conseillé, "
-            "500 lignes et 2 Mo maximum."
+            "UTF-8 ou Windows-1252, séparateur point-virgule conseillé, 500 lignes et 2 Mo maximum."
         ),
         widget=forms.ClearableFileInput(attrs={"accept": ".csv,text/csv"}),
     )
@@ -123,20 +121,14 @@ class AnimationFilterForm(forms.Form):
         widget=forms.TimeInput(attrs={"type": "time"}),
     )
     status = forms.ChoiceField(label="Statut", required=False)
-    available_only = forms.BooleanField(
-        label="Places disponibles uniquement", required=False
-    )
+    available_only = forms.BooleanField(label="Places disponibles uniquement", required=False)
 
     def __init__(self, *args, default_date=None, **kwargs):
         if isinstance(default_date, str):
             default_date = date.fromisoformat(default_date)
         default_date_value = default_date.isoformat() if default_date else None
         bound_data = args[0] if args else kwargs.get("data")
-        if (
-            default_date_value
-            and bound_data is not None
-            and "date" not in bound_data
-        ):
+        if default_date_value and bound_data is not None and "date" not in bound_data:
             bound_data = bound_data.copy()
             bound_data["date"] = default_date_value
             if args:
@@ -241,16 +233,10 @@ class StaffRegistrationForm(forms.Form):
         required=False,
         help_text="Code unique et facile à dicter, généré à partir d'un aliment.",
     )
-    family = forms.ModelChoiceField(
-        label="Famille", queryset=GroupFamily.objects.none()
-    )
-    school_level = forms.ModelChoiceField(
-        label="Niveau", queryset=SchoolLevel.objects.none()
-    )
+    family = forms.ModelChoiceField(label="Famille", queryset=GroupFamily.objects.none())
+    school_level = forms.ModelChoiceField(label="Niveau", queryset=SchoolLevel.objects.none())
     visit_date = forms.ChoiceField(label="Jour de visite")
-    student_count = forms.IntegerField(
-        label="Nombre d'étudiants", min_value=1, max_value=500
-    )
+    student_count = forms.IntegerField(label="Nombre d'étudiants", min_value=1, max_value=500)
     chaperone_count = forms.IntegerField(
         label="Nombre de professeurs / accompagnateurs",
         min_value=0,
@@ -271,9 +257,7 @@ class StaffRegistrationForm(forms.Form):
     def __init__(self, *args, registration=None, **kwargs):
         self.registration = registration
         super().__init__(*args, **kwargs)
-        self.fields["existing_institution"].queryset = Institution.objects.order_by(
-            "name", "city"
-        )
+        self.fields["existing_institution"].queryset = Institution.objects.order_by("name", "city")
         family_queryset = GroupFamily.objects.filter(is_active=True)
         if registration and registration.family_id:
             family_queryset = GroupFamily.objects.filter(
@@ -285,9 +269,7 @@ class StaffRegistrationForm(forms.Form):
             level_queryset = SchoolLevel.objects.filter(
                 Q(is_active=True) | Q(pk=registration.school_level_id)
             )
-        self.fields["school_level"].queryset = level_queryset.order_by(
-            "sort_order", "label"
-        )
+        self.fields["school_level"].queryset = level_queryset.order_by("sort_order", "label")
         self.fields["visit_date"].choices = [
             (value, date.fromisoformat(value).strftime("%d/%m/%Y"))
             for value in settings.EVENT_DATES
@@ -351,9 +333,7 @@ class StaffPlanningForm(forms.Form):
         self.sessions = list(sessions)
         current = {
             reservation.session_id: reservation
-            for reservation in registration.reservations.filter(
-                status=Reservation.Status.ACTIVE
-            )
+            for reservation in registration.reservations.filter(status=Reservation.Status.ACTIVE)
         }
         if args and args[0] is not None:
             data = args[0].copy()
@@ -370,48 +350,23 @@ class StaffPlanningForm(forms.Form):
                     data[chaperone_field_name] = reservation.chaperone_count
             args = (data, *args[1:])
         super().__init__(*args, **kwargs)
-        capacity_at = capacity_at or timezone.now()
-        registration_holds_capacity = (
-            registration.status == Registration.Status.CONFIRMED
-            or (
-                registration.status == Registration.Status.DRAFT
-                and registration.draft_expires_at is not None
-                and registration.draft_expires_at > capacity_at
-            )
-        )
-        group_total = registration.total_participant_count
         self.session_options = {}
         for session in self.sessions:
             reservation = current.get(session.pk)
             currently_selected = reservation is not None
-            recoverable = (
-                reservation.total_participant_count
-                if reservation and registration_holds_capacity
-                else 0
-            )
-            available_for_group = max(0, session.remaining_capacity + recoverable)
+            available_for_group = session.remaining_capacity
             removal_required = currently_selected and (
-                not session.animation.is_active
-                or session.status == Session.Status.CANCELLED
+                not session.animation.is_active or session.status == Session.Status.CANCELLED
             )
-            editable = (
-                currently_selected
-                or (
-                    session.status == Session.Status.OPEN
-                    and session.animation.is_active
-                    and available_for_group > 0
-                )
+            editable = currently_selected or (
+                session.status == Session.Status.OPEN and session.animation.is_active
             )
             if currently_selected and session.status != Session.Status.OPEN:
                 student_maximum = reservation.student_count
                 chaperone_maximum = reservation.chaperone_count
             else:
-                student_maximum = min(
-                    registration.student_count, available_for_group
-                )
-                chaperone_maximum = min(
-                    registration.chaperone_count, available_for_group
-                )
+                student_maximum = registration.student_count
+                chaperone_maximum = registration.chaperone_count
             described_by = f"capacity-{session.pk} allocation-help-{session.pk}"
             self.fields[self.student_field_name(session.pk)] = forms.IntegerField(
                 label="Élèves",
@@ -435,8 +390,7 @@ class StaffPlanningForm(forms.Form):
                 max_value=chaperone_maximum,
                 initial=reservation.chaperone_count if reservation else 0,
                 disabled=(
-                    not editable
-                    or (registration.chaperone_count == 0 and reservation is None)
+                    not editable or (registration.chaperone_count == 0 and reservation is None)
                 ),
                 widget=forms.NumberInput(
                     attrs={
@@ -451,9 +405,7 @@ class StaffPlanningForm(forms.Form):
                 "editable": editable,
                 "removal_required": removal_required,
                 "can_fill_full_group": (
-                    session.status == Session.Status.OPEN
-                    and session.animation.is_active
-                    and group_total <= available_for_group
+                    session.status == Session.Status.OPEN and session.animation.is_active
                 ),
             }
 
@@ -470,10 +422,7 @@ class StaffPlanningForm(forms.Form):
         for session in self.sessions:
             student_field_name = self.student_field_name(session.pk)
             chaperone_field_name = self.chaperone_field_name(session.pk)
-            if (
-                student_field_name in self.errors
-                or chaperone_field_name in self.errors
-            ):
+            if student_field_name in self.errors or chaperone_field_name in self.errors:
                 continue
             student_count = cleaned.get(student_field_name) or 0
             chaperone_count = cleaned.get(chaperone_field_name) or 0
@@ -492,12 +441,6 @@ class StaffPlanningForm(forms.Form):
                     "Indiquez au moins un élève pour réserver cette animation.",
                 )
                 continue
-            available = self.session_options[session.pk]["available_for_group"]
-            if student_count + chaperone_count > available:
-                self.add_error(
-                    student_field_name,
-                    f"Cette séance ne dispose que de {available} place(s) pour ce groupe.",
-                )
         return cleaned
 
     def requested_counts(self):
@@ -505,9 +448,7 @@ class StaffPlanningForm(forms.Form):
             raise ValueError("Le formulaire doit être valide.")
         requested = {}
         for session in self.sessions:
-            student_count = (
-                self.cleaned_data.get(self.student_field_name(session.pk)) or 0
-            )
+            student_count = self.cleaned_data.get(self.student_field_name(session.pk)) or 0
             if student_count <= 0:
                 continue
             requested[session.pk] = (
@@ -567,9 +508,9 @@ class MailingForm(forms.Form):
             (value, date.fromisoformat(value).strftime("%d/%m/%Y"))
             for value in settings.EVENT_DATES
         ]
-        self.fields["family"].queryset = GroupFamily.objects.filter(
-            is_active=True
-        ).order_by("sort_order", "name")
+        self.fields["family"].queryset = GroupFamily.objects.filter(is_active=True).order_by(
+            "sort_order", "name"
+        )
 
     def clean_visit_date(self):
         value = self.cleaned_data["visit_date"]
