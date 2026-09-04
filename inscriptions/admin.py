@@ -1,12 +1,25 @@
+from datetime import date
+
+from django import forms
 from django.conf import settings
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.contrib.admin import helpers
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.translation import ngettext
 from django.views.decorators.debug import sensitive_variables
 
+from catalogue.models import SchoolLevel
 from communication.models import EmailLog
 from communication.services import schedule_registration_email
-from inscriptions.services.registration import cancel_registration
+from inscriptions.services.registration import (
+    RegistrationError,
+    cancel_registration,
+    update_registration,
+)
 from inscriptions.services.tokens import rotate_registration_token
 
 from .models import (
@@ -17,6 +30,116 @@ from .models import (
     Reservation,
     Teacher,
 )
+
+
+class RegistrationBulkUpdateForm(forms.Form):
+    apply_family = forms.BooleanField(label="Modifier la famille", required=False)
+    family = forms.ModelChoiceField(
+        label="Nouvelle famille",
+        queryset=GroupFamily.objects.order_by("sort_order", "name"),
+        required=False,
+        empty_label="Aucune famille (effacer)",
+    )
+    apply_school_level = forms.BooleanField(label="Modifier le niveau", required=False)
+    school_level = forms.ModelChoiceField(
+        label="Nouveau niveau",
+        queryset=SchoolLevel.objects.order_by("sort_order", "label"),
+        required=False,
+        empty_label="Sélectionner",
+    )
+    apply_visit_date = forms.BooleanField(label="Modifier le jour de visite", required=False)
+    visit_date = forms.DateField(
+        label="Nouveau jour de visite",
+        required=False,
+        input_formats=("%Y-%m-%d",),
+        widget=forms.Select(
+            choices=(
+                ("", "Sélectionner"),
+                *(
+                    (value, date.fromisoformat(value).strftime("%d/%m/%Y"))
+                    for value in settings.EVENT_DATES
+                ),
+            )
+        ),
+    )
+    apply_student_count = forms.BooleanField(
+        label="Modifier le nombre d'élèves",
+        required=False,
+    )
+    student_count = forms.IntegerField(
+        label="Nouveau nombre d'élèves",
+        min_value=1,
+        max_value=500,
+        required=False,
+    )
+    apply_chaperone_count = forms.BooleanField(
+        label="Modifier le nombre d'accompagnateurs",
+        required=False,
+    )
+    chaperone_count = forms.IntegerField(
+        label="Nouveau nombre d'accompagnateurs",
+        min_value=0,
+        max_value=100,
+        required=False,
+    )
+    apply_special_needs = forms.BooleanField(
+        label="Modifier les besoins particuliers",
+        required=False,
+    )
+    special_needs = forms.CharField(
+        label="Nouveaux besoins particuliers",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    apply_level_comment = forms.BooleanField(
+        label="Modifier la remarque sur le niveau",
+        required=False,
+    )
+    level_comment = forms.CharField(
+        label="Nouvelle remarque sur le niveau",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    apply_comment = forms.BooleanField(label="Modifier le commentaire", required=False)
+    comment = forms.CharField(
+        label="Nouveau commentaire",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    field_pairs = (
+        ("apply_family", "family"),
+        ("apply_school_level", "school_level"),
+        ("apply_visit_date", "visit_date"),
+        ("apply_student_count", "student_count"),
+        ("apply_chaperone_count", "chaperone_count"),
+        ("apply_special_needs", "special_needs"),
+        ("apply_level_comment", "level_comment"),
+        ("apply_comment", "comment"),
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        if not any(cleaned.get(flag_name) for flag_name, _value_name in self.field_pairs):
+            raise forms.ValidationError(
+                "Cochez au moins un champ à modifier avant de continuer."
+            )
+        required_values = {
+            "apply_school_level": ("school_level", "Sélectionnez le nouveau niveau."),
+            "apply_visit_date": ("visit_date", "Sélectionnez le nouveau jour."),
+            "apply_student_count": (
+                "student_count",
+                "Indiquez le nouveau nombre d'élèves.",
+            ),
+            "apply_chaperone_count": (
+                "chaperone_count",
+                "Indiquez le nouveau nombre d'accompagnateurs.",
+            ),
+        }
+        for flag_name, (value_name, message) in required_values.items():
+            if cleaned.get(flag_name) and cleaned.get(value_name) is None:
+                self.add_error(value_name, message)
+        return cleaned
 
 
 @admin.register(Institution)
@@ -57,7 +180,7 @@ class ReservationInline(admin.TabularInline):
 
 @admin.register(Registration)
 class RegistrationAdmin(admin.ModelAdmin):
-    actions = ("cancel_selected", "resend_confirmation")
+    actions = ("bulk_update_registrations", "cancel_selected", "resend_confirmation")
     list_display = (
         "group_code",
         "group_name",
@@ -118,6 +241,113 @@ class RegistrationAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    @admin.action(
+        description="Modifier les groupes sélectionnés",
+        permissions=("change",),
+    )
+    def bulk_update_registrations(self, request, queryset):
+        form = (
+            RegistrationBulkUpdateForm(request.POST)
+            if "apply_bulk_update" in request.POST
+            else RegistrationBulkUpdateForm()
+        )
+        if "apply_bulk_update" in request.POST and form.is_valid():
+            cancelled_count = queryset.filter(status=Registration.Status.CANCELLED).count()
+            if cancelled_count:
+                form.add_error(
+                    None,
+                    ngettext(
+                        "%d groupe sélectionné est annulé et ne peut plus être modifié.",
+                        "%d groupes sélectionnés sont annulés et ne peuvent plus être modifiés.",
+                        cancelled_count,
+                    )
+                    % cancelled_count,
+                )
+
+            if form.cleaned_data.get("apply_visit_date"):
+                incompatible_reservations = Reservation.objects.filter(
+                    registration__in=queryset,
+                    status=Reservation.Status.ACTIVE,
+                ).exclude(session__date=form.cleaned_data["visit_date"])
+                if incompatible_reservations.exists():
+                    form.add_error(
+                        "visit_date",
+                        (
+                            "Au moins un groupe possède une animation réservée un autre "
+                            "jour. Modifiez d'abord son programme."
+                        ),
+                    )
+
+        if "apply_bulk_update" in request.POST and form.is_valid():
+            update_values = {
+                value_name: form.cleaned_data[value_name]
+                for flag_name, value_name in form.field_pairs
+                if form.cleaned_data.get(flag_name)
+            }
+            applied_labels = [
+                form.fields[value_name].label.lower()
+                for flag_name, value_name in form.field_pairs
+                if form.cleaned_data.get(flag_name)
+            ]
+            changed = 0
+            try:
+                with transaction.atomic():
+                    for registration in queryset.select_related(
+                        "institution", "teacher", "school_level", "family"
+                    ):
+                        updated = update_registration(
+                            registration,
+                            **update_values,
+                            actor_kind=RegistrationEvent.ActorKind.STAFF,
+                            actor_user=request.user,
+                        )
+                        self.log_change(
+                            request,
+                            updated,
+                            "Modification groupée : " + ", ".join(applied_labels) + ".",
+                        )
+                        changed += 1
+            except (RegistrationError, ValidationError) as error:
+                if isinstance(error, ValidationError):
+                    error_message = " ".join(error.messages)
+                else:
+                    error_message = str(error)
+                form.add_error(None, error_message)
+            else:
+                self.message_user(
+                    request,
+                    ngettext(
+                        "%d groupe a été modifié sans envoi de courriel.",
+                        "%d groupes ont été modifiés sans envoi de courriel.",
+                        changed,
+                    )
+                    % changed,
+                    messages.SUCCESS,
+                )
+                return None
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Modifier plusieurs groupes",
+            "opts": self.model._meta,
+            "queryset": queryset,
+            "selected_count": queryset.count(),
+            "form": form,
+            "field_rows": [
+                {"apply": form[flag_name], "value": form[value_name]}
+                for flag_name, value_name in form.field_pairs
+            ],
+            "action_name": "bulk_update_registrations",
+            "action_checkbox_name": helpers.ACTION_CHECKBOX_NAME,
+            "select_across": request.POST.get("select_across", "0"),
+            "media": self.media + form.media,
+            "bulk_notice": (
+                "Seuls les champs cochés seront remplacés sur tous les groupes "
+                "sélectionnés. Cette action n'envoie aucun courriel."
+            ),
+        }
+        return TemplateResponse(request, "admin/bulk_update_selected.html", context)
 
     @admin.action(description="Annuler les inscriptions sélectionnées")
     def cancel_selected(self, request, queryset):

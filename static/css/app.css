@@ -958,6 +958,155 @@ button.button-quiet:hover {
   gap: .6rem;
 }
 
+.planning-main {
+  width: min(70rem, calc(100% - 2rem));
+}
+
+.planning-layout {
+  display: block;
+}
+
+.planning-summary {
+  position: fixed;
+  z-index: 30;
+  top: 7rem;
+  right: 1rem;
+  width: 19rem;
+  max-height: calc(100vh - 8rem);
+  margin: 0;
+  padding: .8rem;
+  overflow: hidden;
+  background: #fffdf7;
+  border: 1px solid #d8c169;
+  border-left: .4rem solid var(--brand-yellow);
+  border-radius: 0 .55rem .55rem 0;
+  box-shadow: 0 .55rem 1.4rem rgb(48 49 51 / 16%);
+}
+
+.planning-summary-heading {
+  display: flex;
+  margin-bottom: .55rem;
+  gap: .75rem 1.5rem;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.planning-summary-heading .eyebrow {
+  margin-bottom: .15rem;
+}
+
+.planning-summary-heading h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.planning-summary-count {
+  margin: 0;
+  padding: .35rem .6rem;
+  color: #155341;
+  background: var(--brand-green-soft);
+  border-radius: 999px;
+  font-size: .75rem;
+}
+
+.planning-summary-controls {
+  display: flex;
+  width: 100%;
+  gap: .45rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.planning-summary-toggle {
+  min-height: 0;
+  padding: .3rem .48rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  font-size: .65rem;
+}
+
+.planning-summary-toggle:hover,
+.planning-summary-toggle:focus {
+  color: var(--ink);
+  background: var(--brand-yellow-soft);
+  border-color: var(--brand-yellow);
+  box-shadow: none;
+}
+
+.planning-summary-empty {
+  margin: .35rem 0 0;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.planning-summary-list {
+  display: grid;
+  max-height: 10rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  grid-template-columns: 1fr;
+  gap: .45rem;
+  list-style: none;
+}
+
+.planning-summary-item {
+  display: flex;
+  min-width: 0;
+  padding: .5rem .6rem;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-left: .28rem solid var(--brand-green);
+  border-radius: 0 .35rem .35rem 0;
+  font-size: .8rem;
+  line-height: 1.3;
+}
+
+.planning-summary-item[hidden] {
+  display: none;
+}
+
+.planning-summary.is-collapsed .planning-summary-list,
+.planning-summary.is-collapsed .planning-summary-empty,
+.planning-summary.is-collapsed .planning-summary-count {
+  display: none;
+}
+
+.planning-summary.is-collapsed .planning-summary-heading {
+  margin-bottom: 0;
+}
+
+.planning-summary.is-collapsed {
+  width: 13rem;
+}
+
+.planning-summary-time {
+  color: #6b5100;
+  font-size: .68rem;
+  font-weight: 850;
+  letter-spacing: .05em;
+}
+
+.planning-summary-location,
+.planning-summary-participants {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planning-summary-participants {
+  margin-top: .18rem;
+  color: #155341;
+  font-weight: 750;
+}
+
 .planning-session-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;
@@ -1044,7 +1193,39 @@ button.button-quiet:hover {
   border-top-color: var(--brand-green);
 }
 
+@media (max-width: 70rem) {
+  .planning-summary {
+    position: sticky;
+    top: .5rem;
+    right: auto;
+    width: auto;
+    max-height: calc(100vh - 1rem);
+    margin-bottom: 1rem;
+  }
+
+  .planning-summary.is-collapsed {
+    width: auto;
+  }
+
+  .planning-summary-heading {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .planning-summary-controls {
+    width: auto;
+  }
+
+  .planning-summary-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 62rem) {
+  .planning-summary-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .planning-session-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1149,6 +1330,20 @@ button.button-quiet:hover {
   }
 
   .planning-session-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .planning-summary {
+    position: static;
+  }
+
+  .planning-summary-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .planning-summary-list {
+    max-height: none;
     grid-template-columns: 1fr;
   }
 

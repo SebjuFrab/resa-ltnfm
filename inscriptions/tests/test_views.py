@@ -1,5 +1,6 @@
 from datetime import date, datetime, time
 
+from django.core import mail
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -197,6 +198,7 @@ class PublicRegistrationViewTests(TestCase):
             EmailLog.objects.get(registration=registration).status,
             EmailLog.Status.SENT,
         )
+        self.assertEqual(mail.outbox[0].cc, [])
         complete_response = self.client.get(complete_url)
         self.assertEqual(complete_response.status_code, 200)
         self.assertContains(complete_response, registration.group_name)

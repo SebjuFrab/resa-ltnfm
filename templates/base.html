@@ -44,7 +44,7 @@
       </nav>
     </div>
   {% endif %}
-  <main id="contenu" class="container">
+  <main id="contenu" class="container{% block main_class %}{% endblock %}">
     {% if messages %}
       <div aria-live="polite">
         {% for message in messages %}<p class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</p>{% endfor %}

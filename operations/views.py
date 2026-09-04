@@ -11,7 +11,7 @@ from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
+from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -132,6 +132,22 @@ def _filter_registrations(queryset, search_form):
         queryset = queryset.filter(visit_date=search_form.cleaned_data["date"])
     if search_form.cleaned_data["status"]:
         queryset = queryset.filter(status=search_form.cleaned_data["status"])
+    animation_assignment = search_form.cleaned_data["animation_assignment"]
+    if animation_assignment:
+        queryset = queryset.annotate(
+            _has_active_reservation=Exists(
+                Reservation.objects.filter(
+                    registration_id=OuterRef("pk"),
+                    status=Reservation.Status.ACTIVE,
+                )
+            )
+        )
+        queryset = queryset.filter(
+            _has_active_reservation=(
+                animation_assignment
+                == RegistrationSearchForm.AnimationAssignment.ASSIGNED
+            )
+        )
     return queryset
 
 
@@ -869,6 +885,7 @@ def _planning_context(request, registration, *, pending_update=None):
     planning_post_query = f"date={planning_date.isoformat()}"
     if pending_update:
         planning_post_query = f"reschedule=1&{planning_post_query}"
+    planning_summary_rows = planning_form.summary_rows(all_sessions)
     return (
         sessions,
         planning_form,
@@ -881,6 +898,13 @@ def _planning_context(request, registration, *, pending_update=None):
             "filter_form": filter_form,
             "planning_form": planning_form,
             "session_rows": planning_form.session_rows(sessions),
+            "planning_summary_rows": planning_summary_rows,
+            "planning_summary_has_selection": any(
+                row["is_selected"] for row in planning_summary_rows
+            ),
+            "planning_summary_selection_count": sum(
+                row["is_selected"] for row in planning_summary_rows
+            ),
             "action_url": action_url,
             "planning_post_url": f"{action_url}?{planning_post_query}",
         },

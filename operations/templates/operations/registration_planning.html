@@ -2,6 +2,7 @@
 {% load static %}
 
 {% block title %}Animations de {{ registration.group_code }} — LTNM{% endblock %}
+{% block main_class %} planning-main{% endblock %}
 
 {% block content %}
   <div class="page-heading-row">
@@ -42,10 +43,42 @@
         <label><input type="checkbox" name="confirm_over_capacity" value="yes" required> Je confirme vouloir dépasser la jauge.</label>
       </section>
     {% endif %}
+    <div class="planning-layout">
+    <aside class="planning-summary" aria-labelledby="planning-summary-title" data-planning-summary>
+      <div class="planning-summary-heading">
+        <div>
+          <p class="eyebrow">Repère permanent</p>
+          <h2 id="planning-summary-title">Planning choisi pour ce groupe</h2>
+        </div>
+        <div class="planning-summary-controls">
+          <p class="planning-summary-count"><strong data-planning-summary-count>{{ planning_summary_selection_count }}</strong> animation(s) sélectionnée(s)</p>
+          <button class="planning-summary-toggle" type="button" aria-expanded="true" data-planning-summary-toggle>Réduire</button>
+        </div>
+      </div>
+      <p class="planning-summary-empty" data-planning-summary-empty{% if planning_summary_has_selection %} hidden{% endif %}>Aucune animation sélectionnée pour le moment.</p>
+      <ol class="planning-summary-list">
+        {% for summary_row in planning_summary_rows %}
+          <li
+            class="planning-summary-item"
+            data-planning-summary-item
+            data-student-field="{{ summary_row.student_field_name }}"
+            data-chaperone-field="{{ summary_row.chaperone_field_name }}"
+            data-student-count="{{ summary_row.student_count }}"
+            data-chaperone-count="{{ summary_row.chaperone_count }}"
+            {% if not summary_row.is_selected %}hidden{% endif %}
+          >
+            <span class="planning-summary-time">{{ summary_row.session.starts_at|time:"H:i" }}–{{ summary_row.session.ends_at|time:"H:i" }}</span>
+            <strong>{{ summary_row.session.animation.title }}</strong>
+            <span class="planning-summary-location">{{ summary_row.session.location }}</span>
+            <span class="planning-summary-participants" data-planning-summary-participants>{{ summary_row.student_count }} élève(s) + {{ summary_row.chaperone_count }} accompagnateur(s)</span>
+          </li>
+        {% endfor %}
+      </ol>
+    </aside>
     <div class="cards session-grid planning-session-grid" data-layout="compact-grid">
       {% for row in session_rows %}
         {% with session=row.0 student_field=row.1 chaperone_field=row.2 can_fill_full=row.3 allocation_editable=row.4 removal_required=row.5 %}
-          <article class="card planning-session-card{% if session.remaining_capacity == 0 and not allocation_editable %} session-full{% endif %}">
+          <article id="session-{{ session.pk }}" class="card planning-session-card{% if session.remaining_capacity == 0 and not allocation_editable %} session-full{% endif %}">
             <p class="card-kicker">{{ session.starts_at|time:"H:i" }}–{{ session.ends_at|time:"H:i" }} · {{ session.location }}</p>
             <h2 class="card-title">{{ session.animation.title }}</h2>
             <p class="planning-card-summary">{{ session.animation.short_description }}</p>
@@ -86,6 +119,7 @@
         {% endwith %}
       {% empty %}<p class="alert alert-warning">Aucun créneau ne correspond à ces filtres.</p>{% endfor %}
     </div>
+    </div>
 
     <div class="actions">
       {% if registration.status == "DRAFT" %}
@@ -104,4 +138,5 @@
   </form>
   <script src="{% static 'js/auto-submit-filters.js' %}" defer></script>
   <script src="{% static 'js/partial-group-planning.js' %}" defer></script>
+  <script src="{% static 'js/planning-summary.js' %}" defer></script>
 {% endblock %}

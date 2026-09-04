@@ -17,7 +17,8 @@
     <dt>Établissement</dt><dd>{{ registration.institution.name }} — {{ registration.institution.city }} ({{ registration.institution.department }})</dd>
     <dt>Enseignant</dt><dd>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}<br>{{ registration.teacher.email }} · {{ registration.teacher.phone }}</dd>
     <dt>Famille</dt><dd>{{ registration.family }}</dd>
-    <dt>Niveau</dt><dd>{{ registration.school_level }}{% if registration.level_comment %}<br>{{ registration.level_comment }}{% endif %}</dd>
+    <dt>Niveau</dt><dd>{{ registration.school_level }}</dd>
+    {% if registration.level_comment %}<dt>Remarque sur le niveau</dt><dd>{{ registration.level_comment|linebreaksbr }}</dd>{% endif %}
     <dt>Effectif</dt><dd>{{ registration.student_count }} étudiants + {{ registration.chaperone_count }} professeurs/accompagnateurs = <strong>{{ registration.total_participant_count }} personnes</strong></dd>
     <dt>Jour</dt><dd>{{ registration.visit_date|date:"d/m/Y" }}</dd>
     {% if registration.comment %}<dt>Remarque</dt><dd>{{ registration.comment|linebreaksbr }}</dd>{% endif %}

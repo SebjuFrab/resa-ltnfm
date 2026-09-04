@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -6,8 +6,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from catalogue.models import SchoolLevel
-from inscriptions.models import Institution, Registration, Teacher
+from catalogue.models import Animation, Category, SchoolLevel, Session
+from inscriptions.models import Institution, Registration, Reservation, Teacher
 from operations.permissions import REGISTRATION_MANAGE_PERMISSIONS
 
 
@@ -78,6 +78,28 @@ class RegistrationListTests(TestCase):
             edit_token_digest="c" * 64,
             cancelled_at=timezone.now(),
         )
+        category = Category.objects.create(name="Liste", slug="liste")
+        animation = Animation.objects.create(
+            title="Animation réservée",
+            slug="animation-reservee",
+            short_description="Animation utilisée par le filtre.",
+            category=category,
+            indicative_duration=45,
+        )
+        session = Session.objects.create(
+            animation=animation,
+            date=date(2026, 9, 24),
+            starts_at=time(10),
+            ends_at=time(10, 45),
+            location="Salle du filtre",
+            max_capacity=30,
+        )
+        Reservation.objects.create(
+            registration=cls.confirmed,
+            session=session,
+            student_count=24,
+            chaperone_count=2,
+        )
 
     @classmethod
     def _registration(cls, **values):
@@ -113,6 +135,7 @@ class RegistrationListTests(TestCase):
         self.assertContains(response, 'name="q"')
         self.assertContains(response, 'name="date"')
         self.assertContains(response, 'name="status"')
+        self.assertContains(response, 'name="animation_assignment"')
         self.assertContains(response, self.draft.group_code)
         self.assertContains(response, Registration.Status(self.draft.status).label)
         self.assertContains(
@@ -144,6 +167,26 @@ class RegistrationListTests(TestCase):
         self.assertNotContains(status_response, self.draft.group_code)
         self.assertNotContains(status_response, self.confirmed.group_code)
         self.assertContains(status_response, self.cancelled.group_code)
+
+    def test_list_filters_groups_with_or_without_an_active_animation(self):
+        self.client.force_login(self.staff)
+        url = reverse("operations:registration-list")
+
+        assigned_response = self.client.get(
+            url,
+            {"animation_assignment": "assigned"},
+        )
+        self.assertContains(assigned_response, self.confirmed.group_code)
+        self.assertNotContains(assigned_response, self.draft.group_code)
+        self.assertNotContains(assigned_response, self.cancelled.group_code)
+
+        unassigned_response = self.client.get(
+            url,
+            {"animation_assignment": "unassigned"},
+        )
+        self.assertNotContains(unassigned_response, self.confirmed.group_code)
+        self.assertContains(unassigned_response, self.draft.group_code)
+        self.assertContains(unassigned_response, self.cancelled.group_code)
 
     def test_actions_match_the_registration_status(self):
         self.client.force_login(self.staff)

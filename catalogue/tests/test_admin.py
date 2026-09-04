@@ -99,6 +99,61 @@ class CatalogueAdminTests(TestCase):
         self.assertIn("venue_category", form.errors)
         self.assertIn("themes", form.errors)
 
+    def test_bulk_update_animations_changes_only_checked_fields(self):
+        second_animation = Animation.objects.create(
+            title="Comprendre le climat",
+            slug="comprendre-le-climat",
+            short_description="Une autre description.",
+            venue_category=Animation.VenueCategory.OUTDOOR,
+            indicative_duration=45,
+        )
+        second_animation.themes.add(self.theme)
+        original_descriptions = {
+            self.animation.pk: self.animation.short_description,
+            second_animation.pk: second_animation.short_description,
+        }
+        request = RequestFactory().post(
+            "/admin/catalogue/animation/",
+            data={
+                "apply_bulk_update": "1",
+                "apply_venue_category": "on",
+                "venue_category": Animation.VenueCategory.INDOOR,
+                "apply_themes": "on",
+                "themes": [str(self.theme.pk)],
+                "apply_is_active": "on",
+            },
+        )
+        request.user = self.request.user
+        model_admin = AnimationAdmin(Animation, self.site)
+
+        with patch.object(model_admin, "message_user"):
+            response = model_admin.bulk_update_animations(
+                request,
+                Animation.objects.filter(pk__in=(self.animation.pk, second_animation.pk)),
+            )
+
+        self.assertIsNone(response)
+        for animation in Animation.objects.filter(
+            pk__in=(self.animation.pk, second_animation.pk)
+        ):
+            self.assertEqual(animation.venue_category, Animation.VenueCategory.INDOOR)
+            self.assertEqual(list(animation.themes.all()), [self.theme])
+            self.assertFalse(animation.is_active)
+            self.assertEqual(animation.short_description, original_descriptions[animation.pk])
+
+    def test_bulk_update_animations_displays_an_intermediate_form(self):
+        model_admin = AnimationAdmin(Animation, self.site)
+
+        response = model_admin.bulk_update_animations(
+            self.request,
+            Animation.objects.filter(pk=self.animation.pk),
+        )
+
+        self.assertEqual(response.template_name, "admin/bulk_update_selected.html")
+        self.assertEqual(response.context_data["selected_count"], 1)
+        response.render()
+        self.assertContains(response, "Appliquer les modifications")
+
     def test_session_actions_change_status(self):
         session = Session.objects.create(
             animation=self.animation,

@@ -1,6 +1,7 @@
 from datetime import date, time
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -139,7 +140,50 @@ class EmailServiceTests(TestCase):
         self.assertNotIn(str(self.registration.reference), html_body)
         self._assert_branded_message(message)
 
+    def test_confirmation_copies_the_staff_user_who_created_the_registration(self):
+        creator = get_user_model().objects.create_user(
+            username="creator",
+            email="creator@example.test",
+        )
+        RegistrationEvent.objects.create(
+            registration=self.registration,
+            event_type=RegistrationEvent.Type.CREATED,
+            actor_kind=RegistrationEvent.ActorKind.STAFF,
+            actor_user=creator,
+        )
+
+        send_confirmation_email(self.registration)
+
+        self.assertEqual(mail.outbox[0].to, ["marie@example.test"])
+        self.assertEqual(mail.outbox[0].cc, ["creator@example.test"])
+
+    def test_confirmation_does_not_duplicate_the_teacher_address_in_cc(self):
+        creator = get_user_model().objects.create_user(
+            username="creator",
+            email="marie@example.test",
+        )
+        RegistrationEvent.objects.create(
+            registration=self.registration,
+            event_type=RegistrationEvent.Type.CREATED,
+            actor_kind=RegistrationEvent.ActorKind.STAFF,
+            actor_user=creator,
+        )
+
+        send_confirmation_email(self.registration)
+
+        self.assertEqual(mail.outbox[0].cc, [])
+
     def test_modification_no_longer_requires_an_edit_link(self):
+        creator = get_user_model().objects.create_user(
+            username="creator",
+            email="creator@example.test",
+        )
+        RegistrationEvent.objects.create(
+            registration=self.registration,
+            event_type=RegistrationEvent.Type.CREATED,
+            actor_kind=RegistrationEvent.ActorKind.STAFF,
+            actor_user=creator,
+        )
         send_modification_email(self.registration)
 
         self.assertEqual(len(mail.outbox), 1)
@@ -149,6 +193,7 @@ class EmailServiceTests(TestCase):
         self.assertNotIn("Référence", message.body)
         self.assertNotIn(str(self.registration.reference), message.body)
         self.assertNotIn("Consulter ou modifier", message.body)
+        self.assertEqual(message.cc, [])
         self._assert_branded_message(message)
 
     @patch("communication.services.EmailMultiAlternatives.send")

@@ -1,0 +1,114 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls i18n %}
+
+{% block extrahead %}
+  {{ block.super }}
+  {{ media }}
+{% endblock %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    .bulk-update-intro {
+      max-width: 960px;
+      margin-bottom: 20px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--primary);
+      background: var(--darkened-bg);
+    }
+    .bulk-update-form {
+      max-width: 960px;
+    }
+    .bulk-update-row {
+      display: grid;
+      grid-template-columns: minmax(220px, 0.8fr) minmax(300px, 1.5fr);
+      gap: 24px;
+      align-items: start;
+      padding: 16px;
+    }
+    .bulk-update-toggle label {
+      font-weight: 700;
+    }
+    .bulk-update-value label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--body-quiet-color);
+    }
+    .bulk-update-value input[type="text"],
+    .bulk-update-value input[type="number"],
+    .bulk-update-value select,
+    .bulk-update-value textarea {
+      box-sizing: border-box;
+      width: min(100%, 620px);
+    }
+    .bulk-update-value select[multiple] {
+      min-height: 130px;
+    }
+    .bulk-update-selection {
+      margin: 18px 0;
+    }
+    @media (max-width: 767px) {
+      .bulk-update-row {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div id="content-main">
+    <div class="bulk-update-intro">
+      <strong>{{ selected_count }} élément{{ selected_count|pluralize }} sélectionné{{ selected_count|pluralize }}</strong>
+      <p>{{ bulk_notice }}</p>
+    </div>
+
+    <form method="post" class="bulk-update-form" novalidate>
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <ul class="errorlist nonfield">
+          {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+
+      <fieldset class="module aligned">
+        <h2>Champs à remplacer</h2>
+        {% for row in field_rows %}
+          <div class="form-row bulk-update-row">
+            <div class="bulk-update-toggle">
+              {{ row.apply.errors }}
+              {{ row.apply }} {{ row.apply.label_tag }}
+            </div>
+            <div class="bulk-update-value">
+              {{ row.value.errors }}
+              {{ row.value.label_tag }}
+              {{ row.value }}
+              {% if row.value.help_text %}
+                <div class="help">{{ row.value.help_text|safe }}</div>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </fieldset>
+
+      <details class="bulk-update-selection">
+        <summary>Afficher la sélection ({{ selected_count }})</summary>
+        <ul>
+          {% for object in queryset %}<li>{{ object }}</li>{% endfor %}
+        </ul>
+      </details>
+
+      {% for object in queryset %}
+        <input type="hidden" name="{{ action_checkbox_name }}" value="{{ object.pk }}">
+      {% endfor %}
+      <input type="hidden" name="action" value="{{ action_name }}">
+      <input type="hidden" name="select_across" value="{{ select_across }}">
+
+      <div class="submit-row">
+        <input type="submit" name="apply_bulk_update" value="Appliquer les modifications" class="default">
+        <a href="{% url opts|admin_urlname:'changelist' %}" class="button cancel-link">Annuler</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

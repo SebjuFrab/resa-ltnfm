@@ -1,13 +1,126 @@
 from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin import helpers
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.template.response import TemplateResponse
 from django.utils import timezone
 from django.utils.text import slugify
 from django.utils.translation import ngettext
 
 from .models import Animation, SchoolLevel, Session, Theme
 from .services import validate_max_capacity
+
+
+class AnimationBulkUpdateForm(forms.Form):
+    apply_venue_category = forms.BooleanField(
+        label="Modifier la catégorie",
+        required=False,
+    )
+    venue_category = forms.ChoiceField(
+        label="Nouvelle catégorie",
+        required=False,
+        choices=(("", "Sélectionner"), *Animation.VenueCategory.choices),
+    )
+    apply_themes = forms.BooleanField(label="Modifier les thématiques", required=False)
+    themes = forms.ModelMultipleChoiceField(
+        label="Nouvelles thématiques",
+        queryset=Theme.objects.order_by("sort_order", "name"),
+        required=False,
+        widget=forms.SelectMultiple(attrs={"size": 7}),
+    )
+    apply_recommended_levels = forms.BooleanField(
+        label="Modifier les niveaux conseillés",
+        required=False,
+    )
+    recommended_levels = forms.ModelMultipleChoiceField(
+        label="Nouveaux niveaux conseillés",
+        queryset=SchoolLevel.objects.order_by("sort_order", "label"),
+        required=False,
+        widget=forms.SelectMultiple(attrs={"size": 7}),
+    )
+    apply_indicative_duration = forms.BooleanField(
+        label="Modifier la durée indicative",
+        required=False,
+    )
+    indicative_duration = forms.IntegerField(
+        label="Nouvelle durée indicative (minutes)",
+        min_value=1,
+        required=False,
+    )
+    apply_short_description = forms.BooleanField(
+        label="Modifier la description courte",
+        required=False,
+    )
+    short_description = forms.CharField(
+        label="Nouvelle description courte",
+        max_length=300,
+        required=False,
+    )
+    apply_description = forms.BooleanField(
+        label="Modifier la description",
+        required=False,
+    )
+    description = forms.CharField(
+        label="Nouvelle description",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    apply_instructions = forms.BooleanField(label="Modifier les consignes", required=False)
+    instructions = forms.CharField(
+        label="Nouvelles consignes",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    apply_accessibility = forms.BooleanField(label="Modifier l'accessibilité", required=False)
+    accessibility = forms.CharField(
+        label="Nouvelle accessibilité",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    apply_is_active = forms.BooleanField(label="Modifier l'état actif", required=False)
+    is_active = forms.BooleanField(label="Animations actives", required=False)
+
+    field_pairs = (
+        ("apply_venue_category", "venue_category"),
+        ("apply_themes", "themes"),
+        ("apply_recommended_levels", "recommended_levels"),
+        ("apply_indicative_duration", "indicative_duration"),
+        ("apply_short_description", "short_description"),
+        ("apply_description", "description"),
+        ("apply_instructions", "instructions"),
+        ("apply_accessibility", "accessibility"),
+        ("apply_is_active", "is_active"),
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        if not any(cleaned.get(flag_name) for flag_name, _value_name in self.field_pairs):
+            raise forms.ValidationError(
+                "Cochez au moins un champ à modifier avant de continuer."
+            )
+        required_values = {
+            "apply_venue_category": (
+                "venue_category",
+                "Sélectionnez la nouvelle catégorie.",
+            ),
+            "apply_themes": (
+                "themes",
+                "Sélectionnez au moins une thématique.",
+            ),
+            "apply_indicative_duration": (
+                "indicative_duration",
+                "Indiquez la nouvelle durée.",
+            ),
+            "apply_short_description": (
+                "short_description",
+                "Indiquez la nouvelle description courte.",
+            ),
+        }
+        for flag_name, (value_name, message) in required_values.items():
+            if cleaned.get(flag_name) and not cleaned.get(value_name):
+                self.add_error(value_name, message)
+        return cleaned
 
 
 def _available_slug(animation):
@@ -94,7 +207,7 @@ class SessionAdminForm(forms.ModelForm):
 
 @admin.register(Animation)
 class AnimationAdmin(admin.ModelAdmin):
-    actions = ("duplicate_animations",)
+    actions = ("bulk_update_animations", "duplicate_animations")
     date_hierarchy = "created_at"
     exclude = ("category",)
     filter_horizontal = ("themes", "recommended_levels")
@@ -110,6 +223,96 @@ class AnimationAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "venue_category", "themes", "recommended_levels")
     prepopulated_fields = {"slug": ("title",)}
     search_fields = ("title", "short_description", "description", "themes__name")
+
+    @admin.action(
+        description="Modifier les animations sélectionnées",
+        permissions=("change",),
+    )
+    def bulk_update_animations(self, request, queryset):
+        form = (
+            AnimationBulkUpdateForm(request.POST)
+            if "apply_bulk_update" in request.POST
+            else AnimationBulkUpdateForm()
+        )
+        if "apply_bulk_update" in request.POST and form.is_valid():
+            scalar_fields = (
+                "venue_category",
+                "indicative_duration",
+                "short_description",
+                "description",
+                "instructions",
+                "accessibility",
+                "is_active",
+            )
+            applied_labels = []
+            for flag_name, value_name in form.field_pairs:
+                if form.cleaned_data.get(flag_name):
+                    applied_labels.append(form.fields[value_name].label.lower())
+
+            changed = 0
+            with transaction.atomic():
+                for animation in queryset.prefetch_related("themes", "recommended_levels"):
+                    update_fields = []
+                    for field_name in scalar_fields:
+                        if not form.cleaned_data.get(f"apply_{field_name}"):
+                            continue
+                        setattr(animation, field_name, form.cleaned_data[field_name])
+                        update_fields.append(field_name)
+
+                    if update_fields:
+                        animation.save(update_fields=(*update_fields, "updated_at"))
+                    elif form.cleaned_data.get("apply_themes") or form.cleaned_data.get(
+                        "apply_recommended_levels"
+                    ):
+                        animation.updated_at = timezone.now()
+                        animation.save(update_fields=("updated_at",))
+
+                    if form.cleaned_data.get("apply_themes"):
+                        animation.themes.set(form.cleaned_data["themes"])
+                    if form.cleaned_data.get("apply_recommended_levels"):
+                        animation.recommended_levels.set(
+                            form.cleaned_data["recommended_levels"]
+                        )
+                    self.log_change(
+                        request,
+                        animation,
+                        "Modification groupée : " + ", ".join(applied_labels) + ".",
+                    )
+                    changed += 1
+
+            self.message_user(
+                request,
+                ngettext(
+                    "%d animation a été modifiée.",
+                    "%d animations ont été modifiées.",
+                    changed,
+                )
+                % changed,
+                messages.SUCCESS,
+            )
+            return None
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Modifier plusieurs animations",
+            "opts": self.model._meta,
+            "queryset": queryset,
+            "selected_count": queryset.count(),
+            "form": form,
+            "field_rows": [
+                {"apply": form[flag_name], "value": form[value_name]}
+                for flag_name, value_name in form.field_pairs
+            ],
+            "action_name": "bulk_update_animations",
+            "action_checkbox_name": helpers.ACTION_CHECKBOX_NAME,
+            "select_across": request.POST.get("select_across", "0"),
+            "media": self.media + form.media,
+            "bulk_notice": (
+                "Seuls les champs cochés seront remplacés sur toutes les animations "
+                "sélectionnées."
+            ),
+        }
+        return TemplateResponse(request, "admin/bulk_update_selected.html", context)
 
     @admin.action(description="Dupliquer les animations sélectionnées")
     def duplicate_animations(self, request, queryset):

@@ -49,6 +49,10 @@ class GroupImportForm(forms.Form):
 
 
 class RegistrationSearchForm(forms.Form):
+    class AnimationAssignment:
+        ASSIGNED = "assigned"
+        UNASSIGNED = "unassigned"
+
     q = forms.CharField(
         label="Recherche",
         required=False,
@@ -63,6 +67,15 @@ class RegistrationSearchForm(forms.Form):
         widget=forms.DateInput(attrs={"type": "date"}),
     )
     status = forms.ChoiceField(label="Statut", required=False)
+    animation_assignment = forms.ChoiceField(
+        label="Animations réservées",
+        required=False,
+        choices=(
+            ("", "Tous les groupes"),
+            (AnimationAssignment.ASSIGNED, "Au moins une animation"),
+            (AnimationAssignment.UNASSIGNED, "Zéro animation"),
+        ),
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -470,6 +483,33 @@ class StaffPlanningForm(forms.Form):
             )
             for session in sessions
         ]
+
+    def summary_rows(self, sessions=None):
+        sessions = self.sessions if sessions is None else sessions
+        rows = []
+        for session in sessions:
+            student_field_name = self.student_field_name(session.pk)
+            chaperone_field_name = self.chaperone_field_name(session.pk)
+            try:
+                student_count = max(0, int(self[student_field_name].value() or 0))
+            except (TypeError, ValueError):
+                student_count = 0
+            try:
+                chaperone_count = max(0, int(self[chaperone_field_name].value() or 0))
+            except (TypeError, ValueError):
+                chaperone_count = 0
+            rows.append(
+                {
+                    "session": session,
+                    "student_field_name": student_field_name,
+                    "chaperone_field_name": chaperone_field_name,
+                    "student_count": student_count,
+                    "chaperone_count": chaperone_count,
+                    "total_count": student_count + chaperone_count,
+                    "is_selected": student_count > 0,
+                }
+            )
+        return rows
 
 
 class MailingForm(forms.Form):

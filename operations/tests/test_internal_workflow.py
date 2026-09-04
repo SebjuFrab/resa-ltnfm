@@ -164,7 +164,16 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertEqual(created_event.actor_user, self.staff)
         self.assertEqual(EmailLog.objects.get(registration=registration).kind, "CONFIRMATION")
         self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].cc, ["frab@example.test"])
         self.assertNotIn("lien de modification", mail.outbox[0].body.lower())
+        response = self.client.get(
+            reverse(
+                "operations:registration-detail",
+                kwargs={"reference": registration.reference},
+            )
+        )
+        self.assertContains(response, "Remarque sur le niveau")
+        self.assertContains(response, "Seconde et première")
 
     def test_staff_can_save_a_persistent_draft_that_holds_places_without_email(self):
         self.client.post(
@@ -395,6 +404,25 @@ class InternalRegistrationWorkflowTests(TestCase):
             location="Pôle climat",
             max_capacity=40,
         )
+
+        filtered_page = self.client.get(f"{planning_url}?q=climat")
+
+        self.assertEqual(len(filtered_page.context["session_rows"]), 1)
+        self.assertEqual(len(filtered_page.context["planning_summary_rows"]), 2)
+        selected_summary_rows = [
+            row
+            for row in filtered_page.context["planning_summary_rows"]
+            if row["is_selected"]
+        ]
+        self.assertEqual(len(selected_summary_rows), 1)
+        self.assertEqual(selected_summary_rows[0]["session"], self.session)
+        self.assertEqual(selected_summary_rows[0]["student_count"], 12)
+        self.assertContains(filtered_page, "Planning choisi pour ce groupe")
+        self.assertContains(filtered_page, self.session.location)
+        self.assertContains(filtered_page, "js/planning-summary.js")
+        self.assertContains(filtered_page, 'class="container planning-main"')
+        self.assertContains(filtered_page, 'class="planning-layout"')
+        self.assertContains(filtered_page, "data-planning-summary-toggle")
 
         self.client.post(
             f"{planning_url}?q=climat",

@@ -3,7 +3,9 @@ from email.mime.image import MIMEImage
 from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
+from django.core.validators import validate_email
 from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -80,6 +82,26 @@ def _attach_brand_logo(message):
     message.attach(logo)
 
 
+def _confirmation_cc(registration, recipient):
+    creator_email = (
+        registration.events.filter(
+            event_type=RegistrationEvent.Type.CREATED,
+            actor_user__isnull=False,
+        )
+        .order_by("created_at", "pk")
+        .values_list("actor_user__email", flat=True)
+        .first()
+    )
+    creator_email = str(creator_email or "").strip()
+    if not creator_email or creator_email.casefold() == recipient.casefold():
+        return []
+    try:
+        validate_email(creator_email)
+    except ValidationError:
+        return []
+    return [creator_email]
+
+
 @sensitive_variables("edit_url")
 def send_registration_email(registration, kind, *, edit_url=""):
     """Send and log one registration email without propagating SMTP failures.
@@ -91,6 +113,7 @@ def send_registration_email(registration, kind, *, edit_url=""):
         raise ValueError(f"Type de courriel inconnu : {kind}")
 
     recipient = registration.teacher.email
+    cc = _confirmation_cc(registration, recipient) if kind == EmailLog.Kind.CONFIRMATION else []
     email_log = EmailLog.objects.create(
         registration=registration,
         kind=kind,
@@ -121,6 +144,7 @@ def send_registration_email(registration, kind, *, edit_url=""):
             body=text_body,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[recipient],
+            cc=cc,
         )
         message.attach_alternative(html_body, "text/html")
         _attach_brand_logo(message)
