@@ -2,15 +2,16 @@ Bonjour{% if delivery.recipient_name %} {{ delivery.recipient_name }}{% endif %}
 
 {{ personalized_body_text }}
 
-Email de contact : {{ delivery.recipient }}
-
+{% if snapshot.location %}Lieu de rendez-vous : {{ snapshot.location }}{% else %}Lieux de rendez-vous : {{ snapshot.locations|length }} lieux concernés{% endif %}
+{% if snapshot.group_count %}Nombre de groupes : {{ snapshot.group_count }}
+{% endif %}
 Récapitulatif des groupes attendus
 {% for session in snapshot.sessions %}
-{{ session.date_label }} · {{ session.starts_at }}–{{ session.ends_at }} · {{ session.animation }}
-Lieu de rendez-vous : {{ session.location }}
-Effectif total : {{ session.total_count }}
-{% for group in session.groups %}- {{ group.group_code }} — {{ group.institution }} — {{ group.teacher_name }} ({{ group.teacher_email }}) : {{ group.total_count }} personnes, dont {{ group.student_count }} élèves et {{ group.chaperone_count }} accompagnateurs
+{{ session.date_label }} · {{ session.starts_at }}–{{ session.ends_at }} · {{ session.animation }} — {{ session.location }}
+{% for group in session.groups %}- {{ group.group_code }}{% if group.group_name and group.group_name != group.group_code %} ({{ group.group_name }}){% endif %} — {{ group.institution }} — {{ group.school_level }}{% if group.level_comment %} / {{ group.level_comment }}{% endif %} — {{ group.teacher_name }} ({{ group.teacher_email }}{% if group.teacher_phone %}, {{ group.teacher_phone }}{% endif %}) : {{ group.total_count }} personnes, dont {{ group.student_count }} élèves et {{ group.chaperone_count }} accompagnateurs{% if group.special_needs %} — Besoins : {{ group.special_needs }}{% endif %}{% if group.comment %} — Remarque : {{ group.comment }}{% endif %}
 {% endfor %}{% empty %}Aucun groupe inscrit.
 {% endfor %}
+
+Votre adresse de contact : {{ delivery.recipient }}
 
 Organisation du salon : {{ organization_email }}{% if organization_phone %} — {{ organization_phone }}{% endif %}

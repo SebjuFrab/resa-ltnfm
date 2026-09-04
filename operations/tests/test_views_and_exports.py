@@ -54,6 +54,10 @@ class OperationsViewTests(TestCase):
             self.client.get(reverse("operations:export-registrations")).status_code,
             403,
         )
+        self.assertEqual(
+            self.client.get(reverse("operations:final-reports")).status_code,
+            403,
+        )
 
     def test_add_registration_permission_alone_cannot_start_the_workflow(self):
         partial_staff = get_user_model().objects.create_user(
@@ -115,3 +119,42 @@ class OperationsViewTests(TestCase):
         first_line = response.content.decode("utf-8-sig").splitlines()[0]
         self.assertIn(",", first_line)
         self.assertNotIn(";", first_line)
+
+    def test_final_report_is_dense_printable_and_grouped_by_location(self):
+        registration = self.data["registration"]
+        registration.level_comment = "Niveau d'origine : classe mixte"
+        registration.comment = "Arrivée par l'entrée nord"
+        registration.save(update_fields=("level_comment", "comment", "updated_at"))
+        session = self.data["session"]
+        session.organizer = "Responsable du pôle"
+        session.organizer_email = "pole@example.test"
+        session.save(update_fields=("organizer", "organizer_email", "updated_at"))
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("operations:final-reports"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Récapitulatif général")
+        self.assertContains(response, "Pôle sols")
+        self.assertContains(response, registration.group_code)
+        self.assertContains(response, "classe mixte")
+        self.assertContains(response, "entrée nord")
+        self.assertContains(response, "pole@example.test")
+        self.assertContains(response, "Imprimer / enregistrer en PDF")
+        self.assertEqual(response.context["location_count"], 1)
+        self.assertEqual(response.context["group_count"], 1)
+        self.assertEqual(response.context["participant_count"], 26)
+        self.assertEqual(response.context["reservation_count"], 1)
+
+    def test_final_report_can_be_filtered_by_location(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.get(
+            reverse("operations:final-reports"),
+            {"date": "2026-09-23", "location": "Pôle sols"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["report_location"], "Pôle sols")
+        self.assertEqual(response.context["report_date"].isoformat(), "2026-09-23")
+        self.assertContains(response, "Récapitulatif — Pôle sols")

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Récapitulatifs finaux — LTNM{% endblock %}
+{% block main_class %} report-page{% endblock %}
+
+{% block content %}
+  <style>@media print { @page { size: A4 landscape; margin: 8mm; } }</style>
+
+  <div class="report-title-row">
+    <div>
+      <p class="eyebrow">Organisation du salon</p>
+      <h1>{% if report_location %}Récapitulatif — {{ report_location }}{% else %}Récapitulatif général{% endif %}</h1>
+      <p>
+        {% if report_date %}{{ report_date|date:"l j F Y" }}{% else %}23 et 24 septembre 2026{% endif %}
+        · généré le {{ generated_at|date:"d/m/Y à H:i" }}
+      </p>
+    </div>
+    <div class="report-brand" aria-hidden="true">LA TERRE<br>EST NOTRE<br>MÉTIER</div>
+  </div>
+
+  <div class="actions">
+    <button type="button" onclick="window.print()">Imprimer / enregistrer en PDF</button>
+    <a class="button button-secondary" href="{% url 'operations:export-reservations' %}{% if report_date %}?date={{ report_date|date:'Y-m-d' }}{% endif %}">Exporter les réservations en CSV</a>
+    <a class="button button-secondary" href="{% url 'operations:mailing-create' %}">Préparer le publipostage</a>
+  </div>
+
+  <form class="filters report-filters" method="get">
+    {{ form.as_p }}
+    <button type="submit">Actualiser</button>
+    <a class="button button-secondary" href="{% url 'operations:final-reports' %}">Tout afficher</a>
+  </form>
+
+  {% if draft_count or unassigned_count or missing_recipient_session_count %}
+    <div class="report-alerts">
+      {% if draft_count %}<p class="alert alert-warning"><strong>{{ draft_count }}</strong> groupe{{ draft_count|pluralize }} encore en brouillon : ils ne figurent pas dans le récapitulatif final.</p>{% endif %}
+      {% if unassigned_count %}<p class="alert alert-warning"><strong>{{ unassigned_count }}</strong> groupe{{ unassigned_count|pluralize }} confirmé{{ unassigned_count|pluralize }} sans animation.</p>{% endif %}
+      {% if missing_recipient_session_count %}<p class="alert alert-warning"><strong>{{ missing_recipient_session_count }}</strong> séance{{ missing_recipient_session_count|pluralize }} sans courriel de responsable.</p>{% endif %}
+    </div>
+  {% endif %}
+
+  <div class="report-metrics" aria-label="Synthèse">
+    <span><strong>{{ location_count }}</strong> lieu{{ location_count|pluralize }}</span>
+    <span><strong>{{ group_count }}</strong> groupe{{ group_count|pluralize }}</span>
+    <span><strong>{{ participant_count }}</strong> participant{{ participant_count|pluralize }}</span>
+    <span><strong>{{ reservation_count }}</strong> affectation{{ reservation_count|pluralize }}</span>
+  </div>
+
+  {% for section in report_sections %}
+    <section class="report-location">
+      <header class="report-location-heading">
+        <div>
+          <p class="eyebrow">Lieu de RDV</p>
+          <h2>{{ section.location }}</h2>
+        </div>
+        <p><strong>{{ section.group_count }}</strong> groupe{{ section.group_count|pluralize }} · <strong>{{ section.session_count }}</strong> séance{{ section.session_count|pluralize }} · <strong>{{ section.allocated_count }}</strong> participations</p>
+      </header>
+      {% if section.contacts %}
+        <p class="report-contacts"><strong>Responsable{{ section.contacts|pluralize }} :</strong>
+          {% for contact in section.contacts %}{{ contact.name|default:"Nom non renseigné" }}{% if contact.email %} — {{ contact.email }}{% endif %}{% if not forloop.last %} ; {% endif %}{% endfor %}
+        </p>
+      {% else %}
+        <p class="report-contacts report-missing"><strong>Responsable :</strong> non renseigné</p>
+      {% endif %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Jour / horaire</th>
+            <th>Animation</th>
+            <th>Groupe</th>
+            <th>Établissement</th>
+            <th>Famille</th>
+            <th>Niveau</th>
+            <th>Enseignant</th>
+            <th>Effectif</th>
+            <th>À signaler</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for reservation in section.rows %}
+            <tr>
+              <td class="report-nowrap"><strong>{{ reservation.session.date|date:"d/m" }}</strong><br>{{ reservation.session.starts_at|time:"H:i" }}–{{ reservation.session.ends_at|time:"H:i" }}</td>
+              <td><strong>{{ reservation.session.animation.title }}</strong></td>
+              <td><strong>{{ reservation.registration.group_code }}</strong>{% if reservation.registration.group_name != reservation.registration.group_code %}<br>{{ reservation.registration.group_name }}{% endif %}</td>
+              <td>{{ reservation.registration.institution.name }}</td>
+              <td>{{ reservation.registration.family|default:"—" }}</td>
+              <td>{{ reservation.registration.school_level }}{% if reservation.registration.level_comment %}<br><span class="report-note">{{ reservation.registration.level_comment|linebreaksbr }}</span>{% endif %}</td>
+              <td>{{ reservation.registration.teacher.first_name }} {{ reservation.registration.teacher.last_name }}<br><span class="report-note">{{ reservation.registration.teacher.phone }}<br>{{ reservation.registration.teacher.email }}</span></td>
+              <td class="report-nowrap"><strong>{{ reservation.total_participant_count }}</strong><br><span class="report-note">{{ reservation.student_count }} + {{ reservation.chaperone_count }}</span></td>
+              <td>{% if reservation.registration.special_needs %}<strong>Besoins :</strong> {{ reservation.registration.special_needs|linebreaksbr }}{% endif %}{% if reservation.registration.special_needs and reservation.registration.comment %}<br>{% endif %}{% if reservation.registration.comment %}{{ reservation.registration.comment|linebreaksbr }}{% endif %}{% if not reservation.registration.special_needs and not reservation.registration.comment %}—{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% empty %}
+    <p class="alert">Aucune réservation confirmée ne correspond aux filtres.</p>
+  {% endfor %}
+
+  {% if unassigned_groups %}
+    <section class="report-location report-anomalies">
+      <header class="report-location-heading">
+        <div><p class="eyebrow">Points à traiter</p><h2>Groupes confirmés sans animation</h2></div>
+      </header>
+      <table class="report-table">
+        <thead><tr><th>Jour</th><th>Groupe</th><th>Établissement</th><th>Niveau</th><th>Enseignant</th><th>Effectif</th></tr></thead>
+        <tbody>
+          {% for registration in unassigned_groups %}
+            <tr><td>{{ registration.visit_date|date:"d/m/Y" }}</td><td><strong>{{ registration.group_code }}</strong></td><td>{{ registration.institution.name }}</td><td>{{ registration.school_level }}{% if registration.level_comment %}<br>{{ registration.level_comment }}{% endif %}</td><td>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}<br>{{ registration.teacher.phone }}</td><td><strong>{{ registration.total_participant_count }}</strong></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+{% endblock %}

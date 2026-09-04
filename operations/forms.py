@@ -109,6 +109,35 @@ class ExportForm(forms.Form):
     )
 
 
+class FinalReportFilterForm(forms.Form):
+    date = forms.ChoiceField(label="Jour", required=False)
+    location = forms.ChoiceField(label="Lieu de RDV", required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["date"].choices = [
+            ("", "Tous les jours"),
+            *(
+                (value, date.fromisoformat(value).strftime("%d/%m/%Y"))
+                for value in settings.EVENT_DATES
+            ),
+        ]
+        locations = (
+            Session.objects.exclude(location="")
+            .order_by("location")
+            .values_list("location", flat=True)
+            .distinct()
+        )
+        self.fields["location"].choices = [
+            ("", "Tous les lieux"),
+            *((location, location) for location in locations),
+        ]
+
+    def clean_date(self):
+        value = self.cleaned_data["date"]
+        return date.fromisoformat(value) if value else None
+
+
 class AnimationFilterForm(forms.Form):
     q = forms.CharField(
         label="Recherche",
@@ -527,12 +556,12 @@ class MailingForm(forms.Form):
         required=False,
     )
     organizer_subject = forms.CharField(
-        label="Objet pour les responsables d’animation",
+        label="Objet pour les responsables des lieux de RDV",
         max_length=255,
         required=False,
     )
     organizer_body_html = forms.CharField(
-        label="Message aux responsables d’animation",
+        label="Message aux responsables des lieux de RDV",
         widget=forms.Textarea,
         max_length=50_000,
         required=False,

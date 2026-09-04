@@ -1,0 +1,31 @@
+<h2 style="margin:14px 0 6px;font-size:18px;">{{ location_name|default:"Récapitulatif des groupes" }}{% if location_group_count %} · {{ location_group_count }} groupe{{ location_group_count|pluralize }}{% endif %}</h2>
+<table width="100%" cellspacing="0" cellpadding="5" border="0" class="group-table" style="width:100%;margin:0 0 12px;border-collapse:collapse;font-size:10px;line-height:1.3;">
+  <thead>
+    <tr style="background:#2f3032;color:#ffffff;">
+      <th align="left">Créneau / animation</th>
+      <th align="left">Groupe</th>
+      <th align="left">Établissement / niveau</th>
+      <th align="left">Contact</th>
+      <th align="right">Effectif</th>
+      <th align="left">À signaler</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for session in sessions %}
+      {% for group in session.groups %}
+        <tr style="border-bottom:1px solid #deddd7;">
+          <td valign="top" style="white-space:nowrap;"><strong>{{ session.date_label }}<br>{{ session.starts_at }}–{{ session.ends_at }}</strong><br>{{ session.animation }}</td>
+          <td valign="top"><strong>{{ group.group_code }}</strong>{% if group.group_name and group.group_name != group.group_code %}<br>{{ group.group_name }}{% endif %}</td>
+          <td valign="top">{{ group.institution }}{% if group.school_level %}<br><strong>{{ group.school_level }}</strong>{% endif %}{% if group.level_comment %}<br>{{ group.level_comment }}{% endif %}</td>
+          <td valign="top">{{ group.teacher_name }}<br><a href="mailto:{{ group.teacher_email }}" style="color:#087f68;">{{ group.teacher_email }}</a>{% if group.teacher_phone %}<br>{{ group.teacher_phone }}{% endif %}</td>
+          <td align="right" valign="top" style="white-space:nowrap;"><strong>{{ group.total_count }}</strong><br>{{ group.student_count }} + {{ group.chaperone_count }}</td>
+          <td valign="top">{% if group.special_needs %}<strong>Besoins :</strong> {{ group.special_needs }}{% endif %}{% if group.special_needs and group.comment %}<br>{% endif %}{% if group.comment %}{{ group.comment }}{% endif %}{% if not group.special_needs and not group.comment %}—{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr style="border-bottom:1px solid #deddd7;"><td valign="top"><strong>{{ session.date_label }}<br>{{ session.starts_at }}–{{ session.ends_at }}</strong><br>{{ session.animation }}</td><td colspan="5">Aucun groupe inscrit.</td></tr>
+      {% endfor %}
+    {% empty %}
+      <tr><td colspan="6" style="padding:12px;">Aucun groupe inscrit.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

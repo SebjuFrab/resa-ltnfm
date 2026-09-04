@@ -187,6 +187,78 @@ class MailingTests(TestCase):
         self.assertEqual((by_family.teacher_count, by_family.organizer_count), (1, 1))
         self.assertEqual((by_slug.teacher_count, by_slug.organizer_count), (1, 1))
 
+    def test_each_location_manager_receives_every_group_at_that_location(self):
+        second_manager_session = Session.objects.create(
+            animation=self.first_session.animation,
+            date=date(2026, 9, 23),
+            starts_at=time(14),
+            ends_at=time(14, 45),
+            location="Pôle sols",
+            max_capacity=60,
+            organizer="Deuxième responsable sols",
+            organizer_email="autre-responsable@example.test",
+        )
+        third_registration = self._registration(
+            suffix="c",
+            group_code="POIREAU",
+            visit_date=date(2026, 9, 23),
+            family=self.family,
+            session=second_manager_session,
+            students=15,
+            chaperones=2,
+        )
+
+        campaign = create_mailing_campaign(
+            organizer_subject="Organisation du lieu",
+            organizer_body_html="<p>Récapitulatif.</p>",
+            visit_date=date(2026, 9, 23),
+            recipient_kinds=(MailingDelivery.RecipientKind.ORGANIZER,),
+        )
+
+        self.assertEqual(campaign.deliveries.count(), 2)
+        for delivery in campaign.deliveries.all():
+            self.assertEqual(delivery.context_snapshot["location"], "Pôle sols")
+            self.assertEqual(delivery.context_snapshot["group_count"], 2)
+            group_codes = {
+                group["group_code"]
+                for session in delivery.context_snapshot["sessions"]
+                for group in session["groups"]
+            }
+            self.assertEqual(
+                group_codes,
+                {self.first_registration.group_code, third_registration.group_code},
+            )
+
+    def test_location_contact_can_come_from_another_session_without_groups(self):
+        self.first_session.organizer = ""
+        self.first_session.organizer_email = ""
+        self.first_session.save(update_fields=("organizer", "organizer_email"))
+        Session.objects.create(
+            animation=self.first_session.animation,
+            date=date(2026, 9, 23),
+            starts_at=time(16),
+            ends_at=time(16, 45),
+            location="Pôle sols",
+            max_capacity=60,
+            organizer="Responsable du lieu",
+            organizer_email="lieu@example.test",
+        )
+
+        campaign = create_mailing_campaign(
+            organizer_subject="Organisation du lieu",
+            organizer_body_html="<p>Récapitulatif.</p>",
+            visit_date=date(2026, 9, 23),
+            recipient_kinds=(MailingDelivery.RecipientKind.ORGANIZER,),
+        )
+
+        delivery = campaign.deliveries.get()
+        self.assertEqual(delivery.recipient, "lieu@example.test")
+        self.assertEqual(delivery.context_snapshot["group_count"], 1)
+        self.assertEqual(
+            delivery.context_snapshot["sessions"][0]["groups"][0]["group_code"],
+            self.first_registration.group_code,
+        )
+
     def test_default_preview_excludes_other_editions_and_anonymized_groups(self):
         Registration.objects.filter(pk=self.first_registration.pk).update(
             visit_date=date(2024, 9, 25)
@@ -270,7 +342,7 @@ class MailingTests(TestCase):
         organizer_message = next(
             message
             for message in mail.outbox
-            if message.to == ["responsable@example.test"]
+            if message.to[0].casefold() == "responsable@example.test"
         )
         self._assert_branded_message(teacher_message)
         self._assert_branded_message(organizer_message)
@@ -293,8 +365,8 @@ class MailingTests(TestCase):
         self.assertIn(self.first_registration.group_code, organizer_message.body)
         self.assertIn(self.second_registration.group_code, organizer_message.body)
         self.assertIn(
-            "Email de contact : responsable@example.test",
-            organizer_message.body,
+            "votre adresse de contact : responsable@example.test",
+            organizer_message.body.casefold(),
         )
         self.assertIn(
             "Organisation du salon : contact@example.test",
@@ -371,8 +443,12 @@ class MailingTests(TestCase):
             ).exists()
         )
         self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].subject, "Message réservé aux animations")
-        self.assertIn("Contenu pour les animations", mail.outbox[0].body)
+        self.assertTrue(
+            all(message.subject == "Message réservé aux animations" for message in mail.outbox)
+        )
+        self.assertTrue(
+            all("Contenu pour les animations" in message.body for message in mail.outbox)
+        )
 
     def test_template_variables_escape_html_and_use_frozen_snapshot(self):
         teacher = self.first_registration.teacher
@@ -427,7 +503,7 @@ class MailingTests(TestCase):
         first = send_mailing_campaign(campaign)
         self.assertEqual(first.failed_count, 3)
         self.assertEqual(mocked_send.call_count, 3)
-        failed = campaign.deliveries.get(recipient="responsable@example.test")
+        failed = campaign.deliveries.get(recipient__iexact="responsable@example.test")
         self.assertNotIn("responsable@example.test", failed.error_summary)
         self.assertNotIn("\n", failed.error_summary)
         self.assertEqual(failed.attempts, 1)

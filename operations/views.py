@@ -2,8 +2,10 @@ import csv
 import uuid
 from collections import defaultdict
 from copy import copy
+from datetime import date
 from uuid import UUID
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin.models import ADDITION, CHANGE, LogEntry
 from django.contrib.admin.views.decorators import staff_member_required
@@ -54,6 +56,7 @@ from .exports import registrations_csv, reservations_csv, sessions_csv
 from .forms import (
     AnimationFilterForm,
     ExportForm,
+    FinalReportFilterForm,
     GroupImportForm,
     MailingForm,
     RegistrationSearchForm,
@@ -607,6 +610,161 @@ def export_download(request):
         raise PermissionDenied
     delimiter = "," if form.cleaned_data["delimiter"] == "comma" else ";"
     return exporters[export_type](visit_date=form.cleaned_data["date"], delimiter=delimiter)
+
+
+@staff_member_required
+@permission_required(RESERVATION_EXPORT_PERMISSIONS, raise_exception=True)
+def final_reports(request):
+    form = FinalReportFilterForm(request.GET or None)
+    report_date = None
+    report_location = ""
+    if form.is_valid():
+        report_date = form.cleaned_data["date"]
+        report_location = form.cleaned_data["location"]
+
+    registrations = Registration.objects.filter(
+        status=Registration.Status.CONFIRMED,
+        anonymized_at__isnull=True,
+    )
+    if report_date:
+        registrations = registrations.filter(visit_date=report_date)
+    else:
+        registrations = registrations.filter(
+            visit_date__in=[date.fromisoformat(value) for value in settings.EVENT_DATES]
+        )
+
+    reservations = (
+        Reservation.objects.filter(
+            status=Reservation.Status.ACTIVE,
+            registration__in=registrations,
+        )
+        .select_related(
+            "registration__institution",
+            "registration__teacher",
+            "registration__school_level",
+            "registration__family",
+            "session__animation",
+        )
+        .order_by(
+            "session__location",
+            "session__date",
+            "session__starts_at",
+            "session__animation__title",
+            "registration__institution__name",
+            "registration__group_code",
+        )
+    )
+    if report_location:
+        reservations = reservations.filter(session__location__iexact=report_location)
+
+    location_sections = {}
+    displayed_registrations = {}
+    sessions_without_recipient = set()
+    for reservation in reservations:
+        session = reservation.session
+        location = " ".join(str(session.location or "").split()) or "Lieu non renseigné"
+        location_key = location.casefold()
+        section = location_sections.setdefault(
+            location_key,
+            {
+                "location": location,
+                "rows": [],
+                "dates": set(),
+                "session_ids": set(),
+                "registration_ids": set(),
+                "contacts": set(),
+                "allocated_count": 0,
+            },
+        )
+        section["rows"].append(reservation)
+        section["dates"].add(session.date)
+        section["session_ids"].add(session.pk)
+        section["registration_ids"].add(reservation.registration_id)
+        section["allocated_count"] += reservation.total_participant_count
+        displayed_registrations[reservation.registration_id] = reservation.registration
+        organizer_name = str(session.organizer or "").strip()
+        organizer_email = str(session.organizer_email or "").strip()
+        if organizer_name or organizer_email:
+            section["contacts"].add((organizer_name, organizer_email))
+        if not organizer_email:
+            sessions_without_recipient.add(session.pk)
+
+    report_dates = {
+        reservation.session.date
+        for section in location_sections.values()
+        for reservation in section["rows"]
+    }
+    if location_sections and report_dates:
+        for session in Session.objects.filter(date__in=report_dates).only(
+            "location", "organizer", "organizer_email"
+        ):
+            location = " ".join(str(session.location or "").split()) or "Lieu non renseigné"
+            section = location_sections.get(location.casefold())
+            if section is None or session.date not in section["dates"]:
+                continue
+            organizer_name = str(session.organizer or "").strip()
+            organizer_email = str(session.organizer_email or "").strip()
+            if organizer_name or organizer_email:
+                section["contacts"].add((organizer_name, organizer_email))
+
+    report_sections = []
+    for section in location_sections.values():
+        section.pop("dates")
+        section["session_count"] = len(section.pop("session_ids"))
+        section["group_count"] = len(section.pop("registration_ids"))
+        section["contacts"] = [
+            {"name": name, "email": email}
+            for name, email in sorted(
+                section["contacts"],
+                key=lambda item: (item[0].casefold(), item[1].casefold()),
+            )
+        ]
+        report_sections.append(section)
+    report_sections.sort(key=lambda section: section["location"].casefold())
+
+    unassigned_groups = Registration.objects.none()
+    if not report_location:
+        unassigned_groups = registrations.annotate(
+            has_active_reservation=Exists(
+                Reservation.objects.filter(
+                    registration_id=OuterRef("pk"),
+                    status=Reservation.Status.ACTIVE,
+                )
+            )
+        ).filter(has_active_reservation=False).select_related(
+            "institution", "teacher", "school_level", "family"
+        ).order_by("visit_date", "institution__name", "group_code")
+
+    drafts = Registration.objects.filter(status=Registration.Status.DRAFT)
+    if report_date:
+        drafts = drafts.filter(visit_date=report_date)
+    else:
+        drafts = drafts.filter(
+            visit_date__in=[date.fromisoformat(value) for value in settings.EVENT_DATES]
+        )
+
+    return render(
+        request,
+        "operations/final_reports.html",
+        {
+            "form": form,
+            "report_sections": report_sections,
+            "location_count": len(report_sections),
+            "group_count": len(displayed_registrations),
+            "reservation_count": sum(len(section["rows"]) for section in report_sections),
+            "participant_count": sum(
+                registration.total_participant_count
+                for registration in displayed_registrations.values()
+            ),
+            "unassigned_groups": unassigned_groups,
+            "unassigned_count": unassigned_groups.count(),
+            "draft_count": drafts.count(),
+            "missing_recipient_session_count": len(sessions_without_recipient),
+            "generated_at": timezone.localtime(),
+            "report_date": report_date,
+            "report_location": report_location,
+        },
+    )
 
 
 def _staff_registration(reference):
@@ -1351,10 +1509,10 @@ def mailing_create(request):
             "<p>Vous trouverez ci-dessous le programme et les informations "
             "utiles pour préparer la venue de votre groupe au salon.</p>"
         ),
-        "organizer_subject": ("Organisation de votre animation — La Terre est Notre Métier"),
+        "organizer_subject": ("Organisation de votre lieu — La Terre est Notre Métier"),
         "organizer_body_html": (
             "<p>Vous trouverez ci-dessous les horaires, les effectifs et les "
-            "coordonnées des groupes attendus sur vos animations.</p>"
+            "coordonnées de tous les groupes attendus sur votre lieu de RDV.</p>"
         ),
     }
     form = MailingForm(request.POST or None, initial=initial)

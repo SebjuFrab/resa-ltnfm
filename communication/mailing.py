@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -16,6 +17,7 @@ from django.db.models import Prefetch, Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from catalogue.models import Session
 from inscriptions.models import Registration, Reservation
 
 from .models import MailingCampaign, MailingDelivery
@@ -27,14 +29,14 @@ MAILING_TEMPLATE_VARIABLES = (
         "name": "prenom",
         "token": "{{ prenom }}",
         "label": "Prénom",
-        "description": "Prénom du professeur ; vide pour un responsable d’animation.",
+        "description": "Prénom du professeur ; vide pour un responsable de lieu.",
     },
     {
         "name": "nom",
         "token": "{{ nom }}",
         "label": "Nom",
         "description": (
-            "Nom du professeur ou nom complet du responsable d’animation."
+            "Nom du professeur ou nom complet du responsable de lieu."
         ),
     },
     {
@@ -181,6 +183,7 @@ def _registration_snapshot(registration):
         "visit_date_label": registration.visit_date.strftime("%d/%m/%Y"),
         "family": str(family) if family else "",
         "school_level": str(registration.school_level),
+        "level_comment": registration.level_comment,
         "student_count": registration.student_count,
         "chaperone_count": registration.chaperone_count,
         "total_count": _total_count(
@@ -189,6 +192,9 @@ def _registration_snapshot(registration):
         "teacher_first_name": registration.teacher.first_name,
         "teacher_last_name": registration.teacher.last_name,
         "teacher_email": registration.teacher.email,
+        "teacher_phone": registration.teacher.phone,
+        "special_needs": registration.special_needs,
+        "comment": registration.comment,
         "reservations": reservations,
     }
 
@@ -237,7 +243,7 @@ def _recipient_specs(*, visit_date=None, family=None):
     specs = []
     missing_teacher_email_count = 0
     missing_organizer_session_ids = set()
-    organizer_buckets = {}
+    location_buckets = {}
 
     for registration in registrations:
         snapshot = _registration_snapshot(registration)
@@ -266,24 +272,32 @@ def _recipient_specs(*, visit_date=None, family=None):
 
         for reservation in registration.mailing_reservations:
             session = reservation.session
+            location = " ".join(str(session.location or "").split()) or "Lieu non renseigné"
+            location_key = location.casefold()
+            bucket = location_buckets.setdefault(
+                location_key,
+                {
+                    "location": location,
+                    "recipients": {},
+                    "sessions": {},
+                },
+            )
             organizer_email = _normalized_email(
                 getattr(session, "organizer_email", "")
             )
             if not organizer_email:
                 missing_organizer_session_ids.add(session.pk)
-                continue
-            bucket_key = organizer_email.casefold()
-            bucket = organizer_buckets.setdefault(
-                bucket_key,
-                {
-                    "recipient": organizer_email,
-                    "names": set(),
-                    "sessions": {},
-                },
-            )
-            organizer_name = str(getattr(session, "organizer", "") or "").strip()
-            if organizer_name:
-                bucket["names"].add(organizer_name)
+            else:
+                recipient_bucket = bucket["recipients"].setdefault(
+                    organizer_email.casefold(),
+                    {
+                        "recipient": organizer_email,
+                        "names": set(),
+                    },
+                )
+                organizer_name = str(getattr(session, "organizer", "") or "").strip()
+                if organizer_name:
+                    recipient_bucket["names"].add(organizer_name)
             session_snapshot = bucket["sessions"].setdefault(
                 session.pk,
                 {
@@ -302,6 +316,9 @@ def _recipient_specs(*, visit_date=None, family=None):
                 "group_code": snapshot["group_code"],
                 "group_name": snapshot["group_name"],
                 "institution": snapshot["institution"],
+                "family": snapshot["family"],
+                "school_level": snapshot["school_level"],
+                "level_comment": snapshot["level_comment"],
                 "teacher_name": " ".join(
                     part
                     for part in (
@@ -311,6 +328,9 @@ def _recipient_specs(*, visit_date=None, family=None):
                     if part
                 ),
                 "teacher_email": snapshot["teacher_email"],
+                "teacher_phone": snapshot["teacher_phone"],
+                "special_needs": snapshot["special_needs"],
+                "comment": snapshot["comment"],
                 "student_count": reservation.student_count,
                 "chaperone_count": reservation.chaperone_count,
                 "total_count": _total_count(
@@ -320,7 +340,37 @@ def _recipient_specs(*, visit_date=None, family=None):
             session_snapshot["groups"].append(group_snapshot)
             session_snapshot["total_count"] += group_snapshot["total_count"]
 
-    for bucket_key, bucket in sorted(organizer_buckets.items()):
+    # Le responsable est saisi sur une séance, mais il est responsable du lieu.
+    # Une autre séance du même lieu peut donc fournir le contact manquant.
+    report_dates = {
+        date.fromisoformat(session["date"])
+        for bucket in location_buckets.values()
+        for session in bucket["sessions"].values()
+    }
+    if location_buckets and report_dates:
+        for session in Session.objects.filter(date__in=report_dates).only(
+            "date", "location", "organizer", "organizer_email"
+        ):
+            location = " ".join(str(session.location or "").split()) or "Lieu non renseigné"
+            bucket = location_buckets.get(location.casefold())
+            if bucket is None or session.date not in {
+                date.fromisoformat(item["date"])
+                for item in bucket["sessions"].values()
+            }:
+                continue
+            organizer_email = _normalized_email(session.organizer_email)
+            if not organizer_email:
+                continue
+            recipient_bucket = bucket["recipients"].setdefault(
+                organizer_email.casefold(),
+                {"recipient": organizer_email, "names": set()},
+            )
+            organizer_name = str(session.organizer or "").strip()
+            if organizer_name:
+                recipient_bucket["names"].add(organizer_name)
+
+    organizer_buckets = {}
+    for _location_key, bucket in sorted(location_buckets.items()):
         sessions = sorted(
             bucket["sessions"].values(),
             key=lambda item: (item["date"], item["starts_at"], item["animation"]),
@@ -332,13 +382,57 @@ def _recipient_specs(*, visit_date=None, family=None):
                     group["group_code"].casefold(),
                 )
             )
+        group_count = len(
+            {
+                group["registration_id"]
+                for session in sessions
+                for group in session["groups"]
+            }
+        )
+        location_snapshot = {
+            "location": bucket["location"],
+            "group_count": group_count,
+            "sessions": sessions,
+        }
+        for recipient_key, recipient in sorted(bucket["recipients"].items()):
+            organizer_bucket = organizer_buckets.setdefault(
+                recipient_key,
+                {
+                    "recipient": recipient["recipient"],
+                    "names": set(),
+                    "locations": [],
+                },
+            )
+            organizer_bucket["names"].update(recipient["names"])
+            organizer_bucket["locations"].append(location_snapshot)
+
+    for recipient_key, bucket in sorted(organizer_buckets.items()):
+        locations = sorted(
+            bucket["locations"], key=lambda item: item["location"].casefold()
+        )
+        sessions = [
+            session for location in locations for session in location["sessions"]
+        ]
+        group_count = len(
+            {
+                group["registration_id"]
+                for session in sessions
+                for group in session["groups"]
+            }
+        )
+        dedupe_digest = hashlib.sha256(recipient_key.encode()).hexdigest()
         specs.append(
             _RecipientSpec(
                 recipient_kind=MailingDelivery.RecipientKind.ORGANIZER,
                 recipient=bucket["recipient"],
                 recipient_name=", ".join(sorted(bucket["names"])),
-                dedupe_key=f"organizer:{bucket_key}",
-                context_snapshot={"sessions": sessions},
+                dedupe_key=f"organizer:{dedupe_digest}",
+                context_snapshot={
+                    "location": locations[0]["location"] if len(locations) == 1 else "",
+                    "locations": locations,
+                    "group_count": group_count,
+                    "sessions": sessions,
+                },
             )
         )
 

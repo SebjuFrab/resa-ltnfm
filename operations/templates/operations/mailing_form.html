@@ -5,7 +5,8 @@
 {% block content %}
   <p class="eyebrow">Communication de fin de préparation</p>
   <h1>Préparer le publipostage</h1>
-  <p>Préparez deux messages distincts : l’un pour les responsables de groupe, l’autre pour les responsables d’animation.</p>
+  <p>Préparez deux messages distincts : l’un pour les responsables de groupe, l’autre pour les responsables des lieux de RDV.</p>
+  {% if perms.catalogue.view_session and perms.inscriptions.view_reservation and perms.inscriptions.view_registration %}<p><a class="button button-secondary" href="{% url 'operations:final-reports' %}">Vérifier le récapitulatif général</a></p>{% endif %}
 
   <form method="post" novalidate id="mailing-form">
     {% csrf_token %}
@@ -18,9 +19,9 @@
         <p>{{ form.family.label_tag }} {{ form.family }} {{ form.family.errors }}</p>
       </div>
       {% if preview %}
-        <p class="total-panel"><strong>{{ preview.teacher_count }}</strong> responsable(s) de groupe et <strong>{{ preview.organizer_count }}</strong> responsable(s) d’animation seront contactés.</p>
+        <p class="total-panel"><strong>{{ preview.teacher_count }}</strong> responsable(s) de groupe seront contactés et <strong>{{ preview.organizer_count }}</strong> récapitulatif(s) de lieu seront envoyés.</p>
         {% if preview.missing_teacher_email_count %}<p class="alert alert-warning"><strong>{{ preview.missing_teacher_email_count }}</strong> groupe(s) confirmé(s) n’ont pas d’adresse de contact valide et ne recevront pas le message.</p>{% endif %}
-        {% if preview.missing_organizer_email_count %}<p class="alert alert-warning"><strong>{{ preview.missing_organizer_email_count }}</strong> séance(s) réservée(s) n’ont pas d’adresse responsable et sont exclues du publipostage responsable.</p>{% endif %}
+        {% if preview.missing_organizer_email_count %}<p class="alert alert-warning"><strong>{{ preview.missing_organizer_email_count }}</strong> séance(s) réservée(s) n’ont pas d’adresse responsable. Elles ne pourront être envoyées que si une autre séance du même lieu possède un responsable.</p>{% endif %}
         {% if preview.missing_teacher_email_count or preview.missing_organizer_email_count %}<p>{{ form.confirm_missing }} {{ form.confirm_missing.label_tag }} {{ form.confirm_missing.errors }}</p>{% endif %}
       {% endif %}
     </fieldset>
@@ -55,7 +56,7 @@
       </p>
     </fieldset>
     <fieldset>
-      <legend>Message aux responsables d’animation</legend>
+      <legend>Message aux responsables des lieux de RDV</legend>
       <p>{{ form.organizer_subject.label_tag }} {{ form.organizer_subject }} {{ form.organizer_subject.errors }}</p>
       {{ form.organizer_body_html.errors }}
       <label id="organizer-editor-label">Contenu du message</label>
@@ -80,14 +81,14 @@
       <div id="organizer-rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-labelledby="organizer-editor-label" aria-multiline="true">{{ organizer_editor_html|safe }}</div>
       <div hidden>{{ form.organizer_body_html }}</div>
       <p class="helptext">
-        Chaque responsable d’animation reçoit automatiquement les horaires, les effectifs et les contacts des groupes attendus.
+        Chaque responsable reçoit automatiquement toutes les séances et tous les groupes attendus sur son lieu de RDV.
         Pour ce public, <code>&#123;&#123; prenom &#125;&#125;</code> reste vide et <code>&#123;&#123; nom &#125;&#125;</code> contient le nom du responsable.
       </p>
     </fieldset>
     <div class="actions">
       <button type="submit" name="action" value="preview">Actualiser l’aperçu</button>
       <button type="submit" name="action" value="send_groups">Envoyer aux responsables de groupe</button>
-      <button type="submit" name="action" value="send_organizers">Envoyer aux responsables d’animation</button>
+      <button type="submit" name="action" value="send_organizers">Envoyer aux responsables des lieux</button>
       <button type="submit" name="action" value="send_both">Envoyer aux deux publics</button>
     </div>
   </form>

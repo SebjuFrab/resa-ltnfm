@@ -1330,9 +1330,9 @@ class InternalRegistrationWorkflowTests(TestCase):
         ):
             self.assertContains(response, template_variable)
         self.assertContains(response, "Message aux responsables de groupe")
-        self.assertContains(response, "Message aux responsables d’animation")
+        self.assertContains(response, "Message aux responsables des lieux de RDV")
         self.assertContains(response, "Envoyer aux responsables de groupe")
-        self.assertContains(response, "Envoyer aux responsables d’animation")
+        self.assertContains(response, "Envoyer aux responsables des lieux")
         self.assertContains(response, "Envoyer aux deux publics")
 
         response = self.client.post(
@@ -1387,7 +1387,7 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertContains(detail_response, "Préparer votre venue")
         self.assertContains(detail_response, "Préparer l’accueil des groupes")
         self.assertContains(detail_response, "Responsables de groupe")
-        self.assertContains(detail_response, "Responsables d’animation")
+        self.assertContains(detail_response, "Responsables des lieux de RDV")
 
     def test_final_mailing_can_send_each_audience_separately(self):
         self.create_and_confirm_registration()

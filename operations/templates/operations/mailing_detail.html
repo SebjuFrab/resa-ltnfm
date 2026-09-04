@@ -16,7 +16,7 @@
     {% endif %}
     {% if has_organizer_deliveries %}
     <article class="card">
-      <p class="eyebrow">Responsables d’animation</p>
+      <p class="eyebrow">Responsables des lieux de RDV</p>
       <h2>{{ campaign.organizer_subject|default:campaign.subject }}</h2>
       <div class="mail-preview">{{ campaign.organizer_body_html|default:campaign.body_html|safe }}</div>
     </article>

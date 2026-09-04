@@ -63,6 +63,7 @@ urlpatterns = [
         name="group-import-template",
     ),
     path("exports/telecharger/", views.export_download, name="export-download"),
+    path("recapitulatifs/", views.final_reports, name="final-reports"),
     path("exports/inscriptions.csv", views.export_registrations, name="export-registrations"),
     path("exports/reservations.csv", views.export_reservations, name="export-reservations"),
     path("exports/seances.csv", views.export_sessions, name="export-sessions"),
