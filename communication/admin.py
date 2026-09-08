@@ -57,7 +57,11 @@ class EmailLogAdmin(admin.ModelAdmin):
             ):
                 continue
             seen_registrations.add(registration.pk)
-            send_registration_email(registration, previous.kind)
+            send_registration_email(
+                registration,
+                previous.kind,
+                cc_email=request.user.email,
+            )
             attempted += 1
         self.message_user(request, f"{attempted} envoi(s) retenté(s).")
 
@@ -157,7 +161,11 @@ class MailingCampaignAdmin(admin.ModelAdmin):
     def retry_failed(self, request, queryset):
         sent = failed = 0
         for campaign in queryset:
-            result = send_mailing_campaign(campaign, retry_failed=True)
+            result = send_mailing_campaign(
+                campaign,
+                retry_failed=True,
+                initiated_by=request.user,
+            )
             sent += result.sent_count
             failed += result.failed_count
         self.message_user(request, f"État après relance : {sent} envoyé(s), {failed} échec(s).")

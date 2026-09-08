@@ -358,7 +358,11 @@ class RegistrationAdmin(admin.ModelAdmin):
                 actor_kind=RegistrationEvent.ActorKind.STAFF,
                 actor_user=request.user,
             )
-            schedule_registration_email(registration, EmailLog.Kind.CANCELLATION)
+            schedule_registration_email(
+                registration,
+                EmailLog.Kind.CANCELLATION,
+                initiated_by=request.user,
+            )
             changed += 1
         self.message_user(request, f"{changed} inscription(s) annulée(s).")
 
@@ -385,6 +389,7 @@ class RegistrationAdmin(admin.ModelAdmin):
                 registration,
                 EmailLog.Kind.CONFIRMATION,
                 edit_url=edit_url,
+                initiated_by=request.user,
             )
             sent += 1
         self.message_user(request, f"{sent} courriel(s) programmé(s).")

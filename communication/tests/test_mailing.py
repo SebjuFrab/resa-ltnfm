@@ -33,7 +33,11 @@ from inscriptions.models import (
 class MailingTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = get_user_model().objects.create_user(username="frab", password="secret")
+        cls.user = get_user_model().objects.create_user(
+            username="frab",
+            email="frab@example.test",
+            password="secret",
+        )
         category = Category.objects.create(name="Nature", slug="nature")
         cls.level = SchoolLevel.objects.create(code="LYCEE", label="Lycée")
         cls.family = GroupFamily.objects.create(
@@ -336,6 +340,9 @@ class MailingTests(TestCase):
         self.assertEqual(first.failed_count, 0)
         self.assertEqual(len(mail.outbox), 3)
         self.assertTrue(all(len(message.to) == 1 for message in mail.outbox))
+        self.assertTrue(
+            all(message.cc == ["frab@example.test"] for message in mail.outbox)
+        )
         teacher_message = next(
             message for message in mail.outbox if message.to == ["prof-a@example.test"]
         )

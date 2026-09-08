@@ -1197,7 +1197,11 @@ def registration_planning(request, reference):
                         actor_user=request.user,
                     )
                     if registration.status == Registration.Status.CONFIRMED and notify_teacher:
-                        schedule_registration_email(registration, EmailLog.Kind.MODIFICATION)
+                        schedule_registration_email(
+                            registration,
+                            EmailLog.Kind.MODIFICATION,
+                            initiated_by=request.user,
+                        )
             elif registration.status == Registration.Status.DRAFT:
                 registration = save_draft(
                     registration,
@@ -1215,7 +1219,11 @@ def registration_planning(request, reference):
                     actor_user=request.user,
                 )
                 if notify_teacher:
-                    schedule_registration_email(registration, EmailLog.Kind.MODIFICATION)
+                    schedule_registration_email(
+                        registration,
+                        EmailLog.Kind.MODIFICATION,
+                        initiated_by=request.user,
+                    )
         except (RegistrationError, CapacityError) as error:
             form.add_error(None, str(error))
         else:
@@ -1316,7 +1324,11 @@ def registration_review(request, reference):
                 actor_kind=RegistrationEvent.ActorKind.STAFF,
                 actor_user=request.user,
             )
-            schedule_registration_email(registration, EmailLog.Kind.CONFIRMATION)
+            schedule_registration_email(
+                registration,
+                EmailLog.Kind.CONFIRMATION,
+                initiated_by=request.user,
+            )
         except (RegistrationError, CapacityError) as error:
             form.add_error(None, str(error))
         else:
@@ -1411,7 +1423,11 @@ def registration_update(request, reference):
                     actor_user=request.user,
                 )
                 if registration.status == Registration.Status.CONFIRMED and notify_teacher:
-                    schedule_registration_email(registration, EmailLog.Kind.MODIFICATION)
+                    schedule_registration_email(
+                        registration,
+                        EmailLog.Kind.MODIFICATION,
+                        initiated_by=request.user,
+                    )
         except (RegistrationError, CapacityError) as error:
             form.add_error(None, str(error))
         else:
@@ -1461,7 +1477,11 @@ def registration_cancel(request, reference):
                 actor_kind=RegistrationEvent.ActorKind.STAFF,
                 actor_user=request.user,
             )
-            schedule_registration_email(registration, EmailLog.Kind.CANCELLATION)
+            schedule_registration_email(
+                registration,
+                EmailLog.Kind.CANCELLATION,
+                initiated_by=request.user,
+            )
         except RegistrationError as error:
             form.add_error(None, str(error))
         else:
@@ -1482,7 +1502,11 @@ def registration_resend(request, reference):
     if registration.status != Registration.Status.CONFIRMED:
         messages.error(request, "Seule une inscription confirmée peut être renvoyée.")
     else:
-        schedule_registration_email(registration, EmailLog.Kind.CONFIRMATION)
+        schedule_registration_email(
+            registration,
+            EmailLog.Kind.CONFIRMATION,
+            initiated_by=request.user,
+        )
         messages.success(request, "Le récapitulatif va être renvoyé au professeur.")
     return redirect("operations:registration-detail", reference=reference)
 

@@ -22,7 +22,7 @@ from inscriptions.models import Registration, Reservation
 
 from .models import MailingCampaign, MailingDelivery
 from .rich_text import rich_html_to_text, sanitize_rich_html
-from .services import _attach_brand_logo, _safe_error_summary
+from .services import _attach_brand_logo, _safe_error_summary, _validated_cc
 
 MAILING_TEMPLATE_VARIABLES = (
     {
@@ -748,7 +748,7 @@ def _render_delivery(delivery):
     )
 
 
-def send_mailing_delivery(delivery_or_id, *, retry_failed=False):
+def send_mailing_delivery(delivery_or_id, *, retry_failed=False, cc_email=None):
     """Send one frozen delivery once; return ``(delivery, attempted)``."""
     delivery_id = (
         delivery_or_id.pk
@@ -758,7 +758,7 @@ def send_mailing_delivery(delivery_or_id, *, retry_failed=False):
     with transaction.atomic():
         delivery = (
             MailingDelivery.objects.select_for_update()
-            .select_related("campaign")
+            .select_related("campaign", "campaign__created_by")
             .get(pk=delivery_id)
         )
         if delivery.status in {
@@ -783,10 +783,17 @@ def send_mailing_delivery(delivery_or_id, *, retry_failed=False):
 
     try:
         subject, text_body, html_body = _render_delivery(delivery)
+        responsible_email = (
+            getattr(delivery.campaign.created_by, "email", "")
+            if cc_email is None
+            else cc_email
+        )
+        cc = _validated_cc(responsible_email, delivery.recipient)
         message = EmailMultiAlternatives(
             subject=subject,
             body=text_body,
             to=[delivery.recipient],
+            cc=cc,
         )
         message.attach_alternative(html_body, "text/html")
         _attach_brand_logo(message)
@@ -838,13 +845,14 @@ def _complete_campaign(campaign_id):
     return campaign, sent, failed
 
 
-def send_mailing_campaign(campaign_or_id, *, retry_failed=False):
+def send_mailing_campaign(campaign_or_id, *, retry_failed=False, initiated_by=None):
     """Synchronously send each pending delivery without ever resending a success."""
     campaign_id = (
         campaign_or_id.pk
         if isinstance(campaign_or_id, MailingCampaign)
         else campaign_or_id
     )
+    cc_email = None if initiated_by is None else getattr(initiated_by, "email", "")
     with transaction.atomic():
         campaign = MailingCampaign.objects.select_for_update().get(pk=campaign_id)
         if campaign.started_at is None:
@@ -880,7 +888,9 @@ def send_mailing_campaign(campaign_or_id, *, retry_failed=False):
     attempted = 0
     for delivery_id in delivery_ids:
         _delivery, was_attempted = send_mailing_delivery(
-            delivery_id, retry_failed=retry_failed
+            delivery_id,
+            retry_failed=retry_failed,
+            cc_email=cc_email,
         )
         attempted += int(was_attempted)
 

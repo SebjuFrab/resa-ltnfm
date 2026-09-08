@@ -173,6 +173,23 @@ class EmailServiceTests(TestCase):
 
         self.assertEqual(mail.outbox[0].cc, [])
 
+    def test_explicit_staff_sender_is_copied_for_every_registration_email(self):
+        staff = get_user_model().objects.create_user(
+            username="sender",
+            email="sender@example.test",
+        )
+
+        for sender in (
+            send_confirmation_email,
+            send_modification_email,
+            send_cancellation_email,
+        ):
+            with self.subTest(sender=sender.__name__):
+                mail.outbox.clear()
+                sender(self.registration, cc_email=staff.email)
+                self.assertEqual(mail.outbox[0].to, ["marie@example.test"])
+                self.assertEqual(mail.outbox[0].cc, ["sender@example.test"])
+
     def test_modification_no_longer_requires_an_edit_link(self):
         creator = get_user_model().objects.create_user(
             username="creator",
@@ -221,17 +238,23 @@ class EmailServiceTests(TestCase):
         )
 
     def test_scheduling_waits_until_transaction_commit(self):
+        staff = get_user_model().objects.create_user(
+            username="validator",
+            email="validator@example.test",
+        )
         with self.captureOnCommitCallbacks(execute=False) as callbacks:
             schedule_registration_email(
                 self.registration,
                 EmailLog.Kind.CONFIRMATION,
                 edit_url="https://example.test/modifier/",
+                initiated_by=staff,
             )
             self.assertEqual(EmailLog.objects.count(), 0)
 
         self.assertEqual(len(callbacks), 1)
         callbacks[0]()
         self.assertEqual(EmailLog.objects.count(), 1)
+        self.assertEqual(mail.outbox[0].cc, ["validator@example.test"])
 
     def test_cancellation_email_does_not_contain_an_edit_link(self):
         send_cancellation_email(self.registration)

@@ -175,6 +175,39 @@ class InternalRegistrationWorkflowTests(TestCase):
         self.assertContains(response, "Remarque sur le niveau")
         self.assertContains(response, "Seconde et première")
 
+    def test_confirmation_copies_the_staff_user_who_performs_validation(self):
+        self.client.post(
+            reverse("operations:registration-create"),
+            self.registration_payload(),
+        )
+        registration = Registration.objects.get(group_code="truffe-doree")
+        self.client.post(
+            reverse(
+                "operations:registration-planning",
+                kwargs={"reference": registration.reference},
+            ),
+            self.planning_payload(self.session),
+        )
+        validator = get_user_model().objects.create_superuser(
+            username="validator",
+            email="validator@example.test",
+            password="secret",
+        )
+        self.client.force_login(validator)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse(
+                    "operations:registration-review",
+                    kwargs={"reference": registration.reference},
+                ),
+                {"confirm": "on"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(mail.outbox[0].to, ["camille@example.test"])
+        self.assertEqual(mail.outbox[0].cc, ["validator@example.test"])
+
     def test_staff_can_save_a_persistent_draft_that_holds_places_without_email(self):
         self.client.post(
             reverse("operations:registration-create"),

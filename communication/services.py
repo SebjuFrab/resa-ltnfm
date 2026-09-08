@@ -102,8 +102,20 @@ def _confirmation_cc(registration, recipient):
     return [creator_email]
 
 
+def _validated_cc(email, recipient):
+    """Return one valid copy address, without duplicating the recipient."""
+    email = str(email or "").strip()
+    if not email or email.casefold() == recipient.casefold():
+        return []
+    try:
+        validate_email(email)
+    except ValidationError:
+        return []
+    return [email]
+
+
 @sensitive_variables("edit_url")
-def send_registration_email(registration, kind, *, edit_url=""):
+def send_registration_email(registration, kind, *, edit_url="", cc_email=None):
     """Send and log one registration email without propagating SMTP failures.
 
     ``edit_url`` is deliberately supplied by the caller: the raw edit token is
@@ -113,7 +125,13 @@ def send_registration_email(registration, kind, *, edit_url=""):
         raise ValueError(f"Type de courriel inconnu : {kind}")
 
     recipient = registration.teacher.email
-    cc = _confirmation_cc(registration, recipient) if kind == EmailLog.Kind.CONFIRMATION else []
+    # When a staff member explicitly initiated the delivery, their address is
+    # frozen by ``schedule_registration_email`` and takes precedence.  Keep the
+    # historical creator fallback for direct confirmation sends.
+    if cc_email is None and kind == EmailLog.Kind.CONFIRMATION:
+        cc = _confirmation_cc(registration, recipient)
+    else:
+        cc = _validated_cc(cc_email, recipient)
     email_log = EmailLog.objects.create(
         registration=registration,
         kind=kind,
@@ -165,32 +183,56 @@ def send_registration_email(registration, kind, *, edit_url=""):
     return email_log
 
 
-def send_confirmation_email(registration, *, edit_url=""):
+def send_confirmation_email(registration, *, edit_url="", cc_email=None):
     return send_registration_email(
-        registration, EmailLog.Kind.CONFIRMATION, edit_url=edit_url
+        registration,
+        EmailLog.Kind.CONFIRMATION,
+        edit_url=edit_url,
+        cc_email=cc_email,
     )
 
 
-def send_modification_email(registration, *, edit_url=""):
+def send_modification_email(registration, *, edit_url="", cc_email=None):
     return send_registration_email(
-        registration, EmailLog.Kind.MODIFICATION, edit_url=edit_url
+        registration,
+        EmailLog.Kind.MODIFICATION,
+        edit_url=edit_url,
+        cc_email=cc_email,
     )
 
 
-def send_cancellation_email(registration):
-    return send_registration_email(registration, EmailLog.Kind.CANCELLATION)
+def send_cancellation_email(registration, *, cc_email=None):
+    return send_registration_email(
+        registration,
+        EmailLog.Kind.CANCELLATION,
+        cc_email=cc_email,
+    )
 
 
 @sensitive_variables("edit_url")
-def schedule_registration_email(registration, kind, *, edit_url=""):
+def schedule_registration_email(
+    registration,
+    kind,
+    *,
+    edit_url="",
+    initiated_by=None,
+):
     """Schedule delivery after the surrounding database transaction commits."""
     registration_pk = registration.pk
+    # Resolve the address now: the request user is not retained by the
+    # transaction callback and their account may be changed before a retry.
+    cc_email = None if initiated_by is None else getattr(initiated_by, "email", "")
 
     def deliver():
         registration_type = type(registration)
         current_registration = registration_type.objects.select_related(
             "institution", "teacher", "school_level"
         ).get(pk=registration_pk)
-        send_registration_email(current_registration, kind, edit_url=edit_url)
+        send_registration_email(
+            current_registration,
+            kind,
+            edit_url=edit_url,
+            cc_email=cc_email,
+        )
 
     transaction.on_commit(deliver, robust=True)
