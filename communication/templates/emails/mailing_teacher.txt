@@ -15,4 +15,4 @@ Niveau : {{ snapshot.registration.school_level }}
 Effectif total : {{ snapshot.registration.total_count }} ({{ snapshot.registration.student_count }} élèves et {{ snapshot.registration.chaperone_count }} accompagnateurs)
 Email de contact : {{ snapshot.registration.teacher_email }}
 
-Organisation du salon : {{ organization_email }}{% if organization_phone %} — {{ organization_phone }}{% endif %}
+{% include "emails/includes/footer.txt" %}

@@ -36,6 +36,8 @@ class MailingTests(TestCase):
         cls.user = get_user_model().objects.create_user(
             username="frab",
             email="frab@example.test",
+            first_name="Camille",
+            last_name="Durand",
             password="secret",
         )
         category = Category.objects.create(name="Nature", slug="nature")
@@ -362,7 +364,7 @@ class MailingTests(TestCase):
         self.assertIn(self.first_registration.group_code, teacher_message.body)
         self.assertIn("Effectif total : 26", teacher_message.body)
         self.assertIn("Email de contact : prof-a@example.test", teacher_message.body)
-        self.assertIn("Organisation du salon : contact@example.test", teacher_message.body)
+        self.assertIn("Camille Durand — frab@example.test", teacher_message.body)
         self.assertIn("Variables : Prénom a|Nom a|26", teacher_message.body)
         self.assertNotIn("Message animation", teacher_message.body)
         self.assertIn(
@@ -376,7 +378,7 @@ class MailingTests(TestCase):
             organizer_message.body.casefold(),
         )
         self.assertIn(
-            "Organisation du salon : contact@example.test",
+            "Camille Durand — frab@example.test",
             organizer_message.body,
         )
         self.assertIn(
@@ -389,6 +391,11 @@ class MailingTests(TestCase):
             organizer_message.body,
         )
         self.assertNotIn("{{ prenom }}", teacher_message.body)
+        for message in mail.outbox:
+            self.assertEqual(message.reply_to, ["frab@example.test"])
+            self.assertIn("Camille Durand", message.alternatives[0].content)
+            self.assertNotIn("contact@example.test", message.alternatives[0].content)
+            self.assertNotIn("02 00 00 00 00", message.body)
         teacher_html = teacher_message.alternatives[0].content
         self.assertLess(
             teacher_html.index("Votre programme"),
@@ -456,6 +463,25 @@ class MailingTests(TestCase):
         self.assertTrue(
             all("Contenu pour les animations" in message.body for message in mail.outbox)
         )
+
+    def test_mailing_retry_uses_the_account_that_retries_for_signature_and_reply(self):
+        campaign = create_mailing_campaign(
+            subject="Informations",
+            body_html="<p>Informations pour tous.</p>",
+            created_by=self.user,
+        )
+        campaign.deliveries.update(status=MailingDelivery.Status.FAILED)
+        retrying_user = get_user_model().objects.create_user(
+            username="retry-contact", first_name="Alex", email="alex@example.test",
+        )
+        result = send_mailing_campaign(campaign, retry_failed=True, initiated_by=retrying_user)
+
+        self.assertEqual(result.sent_count, 3)
+        for message in mail.outbox:
+            self.assertEqual(message.cc, ["alex@example.test"])
+            self.assertEqual(message.reply_to, ["alex@example.test"])
+            self.assertIn("Alex — alex@example.test", message.body)
+            self.assertNotIn("frab@example.test", message.body)
 
     def test_template_variables_escape_html_and_use_frozen_snapshot(self):
         teacher = self.first_registration.teacher

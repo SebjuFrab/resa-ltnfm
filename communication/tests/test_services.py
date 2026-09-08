@@ -256,6 +256,73 @@ class EmailServiceTests(TestCase):
         self.assertEqual(EmailLog.objects.count(), 1)
         self.assertEqual(mail.outbox[0].cc, ["validator@example.test"])
 
+    def test_all_registration_messages_share_the_senders_signature(self):
+        staff = get_user_model().objects.create_user(
+            username="personal-contact",
+            first_name="Camille",
+            last_name="Durand",
+            email="camille.durand@example.test",
+        )
+        footers = []
+        for kind in EmailLog.Kind.values:
+            with self.subTest(kind=kind):
+                with self.captureOnCommitCallbacks(execute=True):
+                    schedule_registration_email(self.registration, kind, initiated_by=staff)
+                message = mail.outbox[-1]
+                html = message.alternatives[0].content
+                self.assertIn(
+                    "Votre contact pour le salon : Camille Durand — camille.durand@example.test",
+                    message.body,
+                )
+                self.assertIn("Camille Durand", html)
+                self.assertIn("mailto:camille.durand@example.test", html)
+                self.assertNotIn("contact@example.test", html)
+                self.assertNotIn("02 00 00 00 00", message.body)
+                self.assertEqual(message.cc, [staff.email])
+                self.assertEqual(message.reply_to, [staff.email])
+                footers.append(html.split("Votre contact pour le salon", 1)[1].split("</tr>")[0])
+        self.assertEqual(footers[0], footers[1])
+        self.assertEqual(footers[0], footers[2])
+
+    def test_signature_and_copy_are_frozen_before_transaction_commit(self):
+        staff = get_user_model().objects.create_user(
+            username="frozen-contact", first_name="Camille", email="before@example.test",
+        )
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            schedule_registration_email(
+                self.registration, EmailLog.Kind.MODIFICATION, initiated_by=staff
+            )
+        staff.first_name = "Changed"
+        staff.email = "after@example.test"
+        staff.save()
+        callbacks[0]()
+        message = mail.outbox[-1]
+        self.assertIn("Camille — before@example.test", message.body)
+        self.assertEqual(message.cc, ["before@example.test"])
+        self.assertEqual(message.reply_to, ["before@example.test"])
+
+    def test_sender_with_recipient_address_keeps_signature_without_duplicate_copy(self):
+        staff = get_user_model().objects.create_user(
+            username="same-address", first_name="Contact", email="MARIE@example.test",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            schedule_registration_email(
+                self.registration, EmailLog.Kind.MODIFICATION, initiated_by=staff
+            )
+        self.assertEqual(mail.outbox[0].cc, [])
+        self.assertEqual(mail.outbox[0].reply_to, ["MARIE@example.test"])
+        self.assertIn("Contact — MARIE@example.test", mail.outbox[0].body)
+
+    def test_no_sender_address_uses_the_organization_contact(self):
+        staff = get_user_model().objects.create_user(username="no-address")
+        with self.captureOnCommitCallbacks(execute=True):
+            schedule_registration_email(
+                self.registration, EmailLog.Kind.MODIFICATION, initiated_by=staff
+            )
+        self.assertIn("Organisation du salon : contact@example.test", mail.outbox[0].body)
+        self.assertIn("02 00 00 00 00", mail.outbox[0].body)
+        self.assertEqual(mail.outbox[0].reply_to, ["contact@example.test"])
+
     def test_cancellation_email_does_not_contain_an_edit_link(self):
         send_cancellation_email(self.registration)
 

@@ -1379,6 +1379,44 @@ button.button-quiet:hover {
   border-left-color: var(--brand-red);
 }
 
+.animation-roster {
+  max-width: 1400px;
+}
+
+.animation-roster-session {
+  margin-block: 2rem;
+  scroll-margin-top: 1rem;
+}
+
+.animation-roster .filters select {
+  max-width: 20rem;
+}
+
+.animation-roster .report-location-heading h2 {
+  font-size: 1.15rem;
+}
+
+.animation-roster-total {
+  margin-block: .7rem;
+  font-size: .9rem;
+}
+
+.animation-roster-table {
+  font-size: .85rem;
+  line-height: 1.45;
+}
+
+.animation-roster-table td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.animation-roster-table caption {
+  text-align: left;
+  padding: .5rem;
+  color: var(--muted);
+}
+
 @media (max-width: 44rem) {
   .container {
     width: min(100% - 1rem, 70rem);
@@ -1583,5 +1621,26 @@ button.button-quiet:hover {
   .report-note {
     color: #222222;
     font-size: 6pt;
+  }
+
+  .animation-roster .table-wrap {
+    break-inside: auto;
+    overflow: visible;
+  }
+
+  .animation-roster-table {
+    font-size: 8pt;
+  }
+
+  .animation-roster-table thead {
+    display: table-header-group;
+  }
+
+  .animation-roster-table tr {
+    break-inside: avoid;
+  }
+
+  .animation-roster-total {
+    break-after: avoid;
   }
 }

@@ -14,4 +14,4 @@ Récapitulatif des groupes attendus
 
 Votre adresse de contact : {{ delivery.recipient }}
 
-Organisation du salon : {{ organization_email }}{% if organization_phone %} — {{ organization_phone }}{% endif %}
+{% include "emails/includes/footer.txt" %}

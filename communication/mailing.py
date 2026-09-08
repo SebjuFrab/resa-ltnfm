@@ -22,7 +22,7 @@ from inscriptions.models import Registration, Reservation
 
 from .models import MailingCampaign, MailingDelivery
 from .rich_text import rich_html_to_text, sanitize_rich_html
-from .services import _attach_brand_logo, _safe_error_summary, _validated_cc
+from .services import _attach_brand_logo, _safe_error_summary, _sender_contact, _validated_cc
 
 MAILING_TEMPLATE_VARIABLES = (
     {
@@ -710,7 +710,7 @@ def _personalize_content(value, values, *, html=False):
     return sanitize_rich_html(personalized) if html else personalized
 
 
-def _render_delivery(delivery):
+def _render_delivery(delivery, *, sender_contact=None):
     values = _template_values(delivery)
     if delivery.recipient_kind == MailingDelivery.RecipientKind.ORGANIZER:
         message_subject = delivery.campaign.organizer_subject or delivery.campaign.subject
@@ -733,8 +733,11 @@ def _render_delivery(delivery):
             message_body_html, values, html=True
         ),
         "personalized_body_text": _personalize_content(message_body_text, values),
-        "organization_email": settings.ORGANIZATION_EMAIL,
-        "organization_phone": settings.ORGANIZATION_PHONE,
+        "sender_contact": (
+            _sender_contact(delivery.campaign.created_by)
+            if sender_contact is None
+            else sender_contact
+        ),
     }
     template = (
         "mailing_teacher"
@@ -748,7 +751,9 @@ def _render_delivery(delivery):
     )
 
 
-def send_mailing_delivery(delivery_or_id, *, retry_failed=False, cc_email=None):
+def send_mailing_delivery(
+    delivery_or_id, *, retry_failed=False, cc_email=None, sender_contact=None
+):
     """Send one frozen delivery once; return ``(delivery, attempted)``."""
     delivery_id = (
         delivery_or_id.pk
@@ -758,7 +763,7 @@ def send_mailing_delivery(delivery_or_id, *, retry_failed=False, cc_email=None):
     with transaction.atomic():
         delivery = (
             MailingDelivery.objects.select_for_update()
-            .select_related("campaign", "campaign__created_by")
+            .select_related("campaign")
             .get(pk=delivery_id)
         )
         if delivery.status in {
@@ -782,7 +787,17 @@ def send_mailing_delivery(delivery_or_id, *, retry_failed=False, cc_email=None):
         )
 
     try:
-        subject, text_body, html_body = _render_delivery(delivery)
+        # Load the nullable author separately from the locked delivery:
+        # PostgreSQL cannot lock the nullable side of an outer join.
+        if sender_contact is None:
+            sender_contact = (
+                _sender_contact(delivery.campaign.created_by)
+                if cc_email is None
+                else _sender_contact(email=cc_email)
+            )
+        subject, text_body, html_body = _render_delivery(
+            delivery, sender_contact=sender_contact
+        )
         responsible_email = (
             getattr(delivery.campaign.created_by, "email", "")
             if cc_email is None
@@ -794,6 +809,7 @@ def send_mailing_delivery(delivery_or_id, *, retry_failed=False, cc_email=None):
             body=text_body,
             to=[delivery.recipient],
             cc=cc,
+            reply_to=[sender_contact["email"]] if sender_contact["email"] else [],
         )
         message.attach_alternative(html_body, "text/html")
         _attach_brand_logo(message)
@@ -853,6 +869,7 @@ def send_mailing_campaign(campaign_or_id, *, retry_failed=False, initiated_by=No
         else campaign_or_id
     )
     cc_email = None if initiated_by is None else getattr(initiated_by, "email", "")
+    sender_contact = _sender_contact(initiated_by) if initiated_by is not None else None
     with transaction.atomic():
         campaign = MailingCampaign.objects.select_for_update().get(pk=campaign_id)
         if campaign.started_at is None:
@@ -891,6 +908,7 @@ def send_mailing_campaign(campaign_or_id, *, retry_failed=False, initiated_by=No
             delivery_id,
             retry_failed=retry_failed,
             cc_email=cc_email,
+            sender_contact=sender_contact,
         )
         attempted += int(was_attempted)
 

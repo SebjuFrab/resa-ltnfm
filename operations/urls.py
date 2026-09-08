@@ -7,6 +7,11 @@ app_name = "operations"
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("animations/", views.animation_list, name="animation-list"),
+    path(
+        "animations/<int:animation_id>/groupes/",
+        views.animation_roster,
+        name="animation-roster",
+    ),
     path("groupes/", views.registration_list, name="registration-list"),
     path("groupes/nouveau/", views.registration_create, name="registration-create"),
     path(

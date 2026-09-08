@@ -138,6 +138,21 @@ class FinalReportFilterForm(forms.Form):
         return date.fromisoformat(value) if value else None
 
 
+class AnimationRosterFilterForm(forms.Form):
+    date = forms.ChoiceField(label="Jour", required=False)
+
+    def __init__(self, *args, dates, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["date"].choices = [
+            ("", "Tous les jours"),
+            *((value.isoformat(), value.strftime("%d/%m/%Y")) for value in dates),
+        ]
+
+    def clean_date(self):
+        value = self.cleaned_data["date"]
+        return date.fromisoformat(value) if value else None
+
+
 class AnimationFilterForm(forms.Form):
     q = forms.CharField(
         label="Recherche",

@@ -20,4 +20,4 @@ Votre programme :
 {% if edit_url %}Consulter ou modifier l'inscription : {{ edit_url }}
 Les modifications sont possibles jusqu'au {{ edit_deadline|date:"d/m/Y \u00e0 H:i" }}.
 {% endif %}
-Organisation du salon : {{ organization_email }}{% if organization_phone %} — {{ organization_phone }}{% endif %}
+{% include "emails/includes/footer.txt" %}

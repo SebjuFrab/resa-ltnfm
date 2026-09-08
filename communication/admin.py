@@ -4,7 +4,7 @@ from inscriptions.models import Registration
 
 from .mailing import send_mailing_campaign
 from .models import EmailLog, MailingCampaign, MailingDelivery
-from .services import send_registration_email
+from .services import _sender_contact, send_registration_email
 
 
 @admin.register(EmailLog)
@@ -61,6 +61,7 @@ class EmailLogAdmin(admin.ModelAdmin):
                 registration,
                 previous.kind,
                 cc_email=request.user.email,
+                sender_contact=_sender_contact(request.user),
             )
             attempted += 1
         self.message_user(request, f"{attempted} envoi(s) retenté(s).")

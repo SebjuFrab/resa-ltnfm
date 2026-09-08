@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Groupes inscrits — {{ animation.title }} — LTNM{% endblock %}
+{% block main_class %} animation-roster{% endblock %}
+
+{% block content %}
+  <div class="page-heading-row">
+    <div>
+      <p class="eyebrow">Groupes inscrits par animation</p>
+      <h1>{{ animation.title }}</h1>
+      <p>Retrouvez les groupes et les effectifs réservés pour chaque créneau.</p>
+    </div>
+    <div class="actions">
+      <a class="button button-secondary" href="{% url 'operations:animation-list' %}">Retour aux animations</a>
+      <button type="button" onclick="window.print()">Imprimer</button>
+    </div>
+  </div>
+
+  <form method="get" class="filters" aria-label="Filtrer les inscrits par jour" data-auto-submit-filters>
+    <fieldset>
+      <legend>Jour de l’animation</legend>
+      {{ filter_form.as_p }}
+      <noscript><button type="submit">Filtrer</button></noscript>
+    </fieldset>
+  </form>
+  <script src="{% static 'js/auto-submit-filters.js' %}" defer></script>
+
+  <div class="report-metrics" aria-label="Synthèse des inscrits">
+    <span><strong>{{ group_count }}</strong> groupe{{ group_count|pluralize }} distinct{{ group_count|pluralize }}</span>
+    <span><strong>{{ session_rows|length }}</strong> créneau{{ session_rows|length|pluralize }}</span>
+    <span><strong>{{ participant_count }}</strong> participations réservées</span>
+  </div>
+  <p class="helptext">Les effectifs correspondent aux personnes inscrites à la séance, même si seule une partie du groupe participe. Les brouillons qui réservent des places sont inclus et identifiés. Un groupe présent à plusieurs séances est compté une fois parmi les groupes, mais ses effectifs sont additionnés dans les participations.</p>
+
+  {% for row in session_rows %}
+    <section class="animation-roster-session" id="seance-{{ row.session.pk }}" aria-labelledby="titre-seance-{{ row.session.pk }}">
+      <header class="report-location-heading">
+        <div>
+          <p class="eyebrow">{{ row.session.date|date:"l j F Y" }}</p>
+          <h2 id="titre-seance-{{ row.session.pk }}">{{ row.session.starts_at|time:"H:i" }}–{{ row.session.ends_at|time:"H:i" }} · {{ row.session.location|default:"Lieu de RDV à préciser" }}</h2>
+        </div>
+        <span class="status-badge status-{{ row.session.status|lower }}">{{ row.session.get_status_display }}</span>
+      </header>
+      <p class="animation-roster-total"><strong>{{ row.group_count }}</strong> groupe{{ row.group_count|pluralize }} · <strong>{{ row.participant_count }}</strong> personne{{ row.participant_count|pluralize }} inscrite{{ row.participant_count|pluralize }} ({{ row.student_count }} élèves + {{ row.chaperone_count }} accompagnateurs) · jauge {{ row.session.max_capacity }}</p>
+      <div class="table-wrap">
+        <table class="animation-roster-table">
+          <caption>Groupes du {{ row.session.date|date:"d/m/Y" }} à {{ row.session.starts_at|time:"H:i" }}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Groupe</th>
+              <th scope="col">Établissement</th>
+              <th scope="col">Professeur / responsable du groupe</th>
+              <th scope="col">Inscrits à cette séance</th>
+              <th scope="col">Statut</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for reservation in row.reservations %}
+              <tr>
+                <td>
+                  {% if can_view_registration_details %}<a href="{% url 'operations:registration-detail' reservation.registration.reference %}">{{ reservation.registration.group_code }}</a>{% else %}<strong>{{ reservation.registration.group_code }}</strong>{% endif %}
+                  {% if reservation.registration.group_name != reservation.registration.group_code %}<br>{{ reservation.registration.group_name }}{% endif %}
+                </td>
+                <td>{{ reservation.registration.institution.name }}</td>
+                <td>
+                  {{ reservation.registration.teacher.first_name }} {{ reservation.registration.teacher.last_name }}
+                  {% if reservation.registration.teacher.email %}<br><a href="mailto:{{ reservation.registration.teacher.email }}">{{ reservation.registration.teacher.email }}</a>{% endif %}
+                  {% if reservation.registration.teacher.phone %}<br>{{ reservation.registration.teacher.phone }}{% endif %}
+                </td>
+                <td><strong>{{ reservation.total_participant_count }} personnes</strong><br>{{ reservation.student_count }} élèves<br>{{ reservation.chaperone_count }} accompagnateurs</td>
+                <td><span class="status-badge status-{{ reservation.registration.status|lower }}">{% if reservation.registration.status == "DRAFT" %}Brouillon — places réservées{% else %}Confirmé{% endif %}</span></td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="5">Aucun groupe inscrit à ce créneau.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% empty %}
+    <p class="alert alert-info">Aucun créneau à afficher pour cette animation.</p>
+  {% endfor %}
+{% endblock %}

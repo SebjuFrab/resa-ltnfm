@@ -114,8 +114,43 @@ def _validated_cc(email, recipient):
     return [email]
 
 
+def _sender_contact(user=None, *, email=None):
+    """Build a reusable signature from the sending account's public details."""
+    address = getattr(user, "email", "") if email is None else email
+    addresses = _validated_cc(address, "")
+    if addresses:
+        return {
+            "name": user.get_full_name().strip() if user is not None else "",
+            "email": addresses[0],
+            "phone": "",
+            "is_personal": True,
+        }
+    return {
+        "name": "",
+        "email": settings.ORGANIZATION_EMAIL,
+        "phone": settings.ORGANIZATION_PHONE,
+        "is_personal": False,
+    }
+
+
+def _registration_sender_contact(registration):
+    event = (
+        registration.events.filter(
+            event_type=RegistrationEvent.Type.CREATED,
+            actor_kind=RegistrationEvent.ActorKind.STAFF,
+            actor_user__isnull=False,
+        )
+        .select_related("actor_user")
+        .order_by("created_at", "pk")
+        .first()
+    )
+    return _sender_contact(event.actor_user if event else None)
+
+
 @sensitive_variables("edit_url")
-def send_registration_email(registration, kind, *, edit_url="", cc_email=None):
+def send_registration_email(
+    registration, kind, *, edit_url="", cc_email=None, sender_contact=None
+):
     """Send and log one registration email without propagating SMTP failures.
 
     ``edit_url`` is deliberately supplied by the caller: the raw edit token is
@@ -132,6 +167,12 @@ def send_registration_email(registration, kind, *, edit_url="", cc_email=None):
         cc = _confirmation_cc(registration, recipient)
     else:
         cc = _validated_cc(cc_email, recipient)
+    if sender_contact is None:
+        sender_contact = (
+            _sender_contact(email=cc_email)
+            if cc_email is not None
+            else _registration_sender_contact(registration)
+        )
     email_log = EmailLog.objects.create(
         registration=registration,
         kind=kind,
@@ -148,8 +189,7 @@ def send_registration_email(registration, kind, *, edit_url="", cc_email=None):
         "total_count": registration.student_count + registration.chaperone_count,
         "contact_email": recipient,
         "edit_url": edit_url,
-        "organization_email": settings.ORGANIZATION_EMAIL,
-        "organization_phone": settings.ORGANIZATION_PHONE,
+        "sender_contact": sender_contact,
         "edit_deadline": settings.REGISTRATION_EDIT_DEADLINE,
     }
     template_name = TEMPLATE_NAMES[kind]
@@ -163,6 +203,7 @@ def send_registration_email(registration, kind, *, edit_url="", cc_email=None):
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[recipient],
             cc=cc,
+            reply_to=[sender_contact["email"]] if sender_contact["email"] else [],
         )
         message.attach_alternative(html_body, "text/html")
         _attach_brand_logo(message)
@@ -220,8 +261,9 @@ def schedule_registration_email(
     """Schedule delivery after the surrounding database transaction commits."""
     registration_pk = registration.pk
     # Resolve the address now: the request user is not retained by the
-    # transaction callback and their account may be changed before a retry.
+    # transaction callback and their account may be changed before delivery.
     cc_email = None if initiated_by is None else getattr(initiated_by, "email", "")
+    sender_contact = _sender_contact(initiated_by) if initiated_by is not None else None
 
     def deliver():
         registration_type = type(registration)
@@ -233,6 +275,7 @@ def schedule_registration_email(
             kind,
             edit_url=edit_url,
             cc_email=cc_email,
+            sender_contact=sender_contact,
         )
 
     transaction.on_commit(deliver, robust=True)

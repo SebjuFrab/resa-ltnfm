@@ -13,7 +13,18 @@ from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, Sum, Value, When
+from django.db.models import (
+    Case,
+    Count,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Prefetch,
+    Q,
+    Sum,
+    Value,
+    When,
+)
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -55,6 +66,7 @@ from inscriptions.services.registration import (
 from .exports import registrations_csv, reservations_csv, sessions_csv
 from .forms import (
     AnimationFilterForm,
+    AnimationRosterFilterForm,
     ExportForm,
     FinalReportFilterForm,
     GroupImportForm,
@@ -927,7 +939,85 @@ def animation_list(request):
     return render(
         request,
         "operations/animation_list.html",
-        {"filter_form": filter_form, "sessions": sessions},
+        {
+            "filter_form": filter_form,
+            "sessions": sessions,
+            "can_view_animation_roster": request.user.has_perms(RESERVATION_EXPORT_PERMISSIONS),
+        },
+    )
+
+
+@staff_member_required
+@permission_required(RESERVATION_EXPORT_PERMISSIONS, raise_exception=True)
+def animation_roster(request, animation_id):
+    animation = get_object_or_404(Animation, pk=animation_id)
+    sessions = Session.objects.filter(animation=animation).exclude(status=Session.Status.CANCELLED)
+    filter_form = AnimationRosterFilterForm(
+        request.GET or None,
+        dates=sessions.order_by("date").values_list("date", flat=True).distinct(),
+    )
+    if filter_form.is_bound:
+        if filter_form.is_valid():
+            if filter_form.cleaned_data["date"]:
+                sessions = sessions.filter(date=filter_form.cleaned_data["date"])
+        else:
+            sessions = sessions.none()
+
+    # Count the allocations actually reserved on each slot, including held
+    # drafts, but not cancelled reservations or expired temporary holds.
+    active_reservations = (
+        Reservation.objects.filter(status=Reservation.Status.ACTIVE)
+        .filter(
+            Q(registration__status=Registration.Status.CONFIRMED)
+            | (
+                Q(registration__status=Registration.Status.DRAFT)
+                & (
+                    Q(registration__draft_expires_at__isnull=True)
+                    | Q(registration__draft_expires_at__gt=timezone.now())
+                )
+            )
+        )
+        .select_related("registration__institution", "registration__teacher")
+        .order_by("registration__institution__name", "registration__group_code", "pk")
+    )
+    sessions = sessions.prefetch_related(
+        Prefetch("reservations", queryset=active_reservations, to_attr="roster_reservations")
+    ).order_by("date", "starts_at", "ends_at", "location", "pk")
+    rows = []
+    group_ids = set()
+    total_students = total_chaperones = 0
+    for session in sessions:
+        reservations = session.roster_reservations
+        students = sum(reservation.student_count for reservation in reservations)
+        chaperones = sum(reservation.chaperone_count for reservation in reservations)
+        group_ids.update(reservation.registration_id for reservation in reservations)
+        total_students += students
+        total_chaperones += chaperones
+        rows.append(
+            {
+                "session": session,
+                "reservations": reservations,
+                "student_count": students,
+                "chaperone_count": chaperones,
+                "participant_count": students + chaperones,
+                "group_count": len(reservations),
+            }
+        )
+    return render(
+        request,
+        "operations/animation_roster.html",
+        {
+            "animation": animation,
+            "filter_form": filter_form,
+            "session_rows": rows,
+            "group_count": len(group_ids),
+            "student_count": total_students,
+            "chaperone_count": total_chaperones,
+            "participant_count": total_students + total_chaperones,
+            "can_view_registration_details": request.user.has_perms(
+                REGISTRATION_DETAIL_PERMISSIONS
+            ),
+        },
     )
 
 

@@ -43,6 +43,9 @@
         </dl>
         <p class="capacity"><strong>{{ session.remaining_capacity }}</strong> place{{ session.remaining_capacity|pluralize }} restante{{ session.remaining_capacity|pluralize }} sur {{ session.max_capacity }}</p>
         <p class="status-badge status-{{ session.status|lower }}">{{ session.get_status_display }}</p>
+        {% if can_view_animation_roster %}
+          <p class="actions"><a class="button button-secondary" href="{% url 'operations:animation-roster' session.animation_id %}#seance-{{ session.pk }}">Voir les groupes inscrits</a></p>
+        {% endif %}
       </article>
     {% empty %}
       <p class="alert alert-warning">Aucun créneau ne correspond à ces filtres.</p>

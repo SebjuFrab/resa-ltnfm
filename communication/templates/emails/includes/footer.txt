@@ -1,0 +1,1 @@
+{% if sender_contact.is_personal %}Votre contact pour le salon : {% if sender_contact.name %}{{ sender_contact.name }} — {% endif %}{% else %}Organisation du salon : {% endif %}{{ sender_contact.email }}{% if sender_contact.phone %} — {{ sender_contact.phone }}{% endif %}

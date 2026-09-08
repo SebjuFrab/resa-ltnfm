@@ -42,12 +42,7 @@
               {% block content %}{% endblock %}
             </td>
           </tr>
-          <tr>
-            <td class="email-pad" style="padding:24px 30px;background:#2f3032;color:#ffffff;border-radius:0 0 12px 12px;">
-              <p style="margin:0 0 6px;color:#f3b709;font-size:12px;font-weight:800;text-transform:uppercase;">Une question sur le salon ?</p>
-              <p style="margin:0;color:#ffffff;font-size:13px;line-height:1.6;"><a href="mailto:{{ organization_email }}" style="color:#ffffff;text-decoration:underline;">{{ organization_email }}</a>{% if organization_phone %} · {{ organization_phone }}{% endif %}</p>
-            </td>
-          </tr>
+          {% include "emails/includes/footer.html" %}
         </table>
       </td>
     </tr>
