@@ -9,6 +9,7 @@ from django.utils.text import slugify
 from django.utils.translation import ngettext
 
 from .models import Animation, SchoolLevel, Session, Theme
+from .scheduling import recalculate_session_end_times
 from .services import validate_max_capacity
 
 
@@ -47,6 +48,7 @@ class AnimationBulkUpdateForm(forms.Form):
         label="Nouvelle durée indicative (minutes)",
         min_value=1,
         required=False,
+        help_text="Les heures de fin des séances seront recalculées à partir de leur début.",
     )
     apply_short_description = forms.BooleanField(
         label="Modifier la description courte",
@@ -207,7 +209,7 @@ class SessionAdminForm(forms.ModelForm):
 
 @admin.register(Animation)
 class AnimationAdmin(admin.ModelAdmin):
-    actions = ("bulk_update_animations", "duplicate_animations")
+    actions = ("bulk_update_animations", "recalculate_schedules", "duplicate_animations")
     date_hierarchy = "created_at"
     exclude = ("category",)
     filter_horizontal = ("themes", "recommended_levels")
@@ -223,6 +225,38 @@ class AnimationAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "venue_category", "themes", "recommended_levels")
     prepopulated_fields = {"slug": ("title",)}
     search_fields = ("title", "short_description", "description", "themes__name")
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if db_field.name == "indicative_duration":
+            kwargs["help_text"] = (
+                "Modifier la durée recalcule l'heure de fin de toutes les séances. "
+                "Les heures de début et les inscriptions sont conservées."
+            )
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
+    @admin.action(description="Recalculer les horaires selon les durées", permissions=("change",))
+    def recalculate_schedules(self, request, queryset):
+        changed = 0
+        try:
+            with transaction.atomic():
+                for animation in queryset.order_by("pk"):
+                    updated = recalculate_session_end_times(animation)
+                    changed += updated
+                    if updated:
+                        self.log_change(
+                            request, animation,
+                            f"Horaires recalculés : {updated} séance(s), "
+                            f"durée {animation.indicative_duration} minutes.",
+                        )
+        except ValidationError as error:
+            self.message_user(request, " ".join(error.messages), messages.ERROR)
+            return
+        self.message_user(
+            request,
+            f"{changed} horaire(s) de fin recalculé(s). Heures de début et inscriptions "
+            "conservées. Aucun courriel envoyé.",
+            messages.SUCCESS,
+        )
 
     @admin.action(
         description="Modifier les animations sélectionnées",
@@ -250,47 +284,56 @@ class AnimationAdmin(admin.ModelAdmin):
                     applied_labels.append(form.fields[value_name].label.lower())
 
             changed = 0
-            with transaction.atomic():
-                for animation in queryset.prefetch_related("themes", "recommended_levels"):
-                    update_fields = []
-                    for field_name in scalar_fields:
-                        if not form.cleaned_data.get(f"apply_{field_name}"):
-                            continue
-                        setattr(animation, field_name, form.cleaned_data[field_name])
-                        update_fields.append(field_name)
-
-                    if update_fields:
-                        animation.save(update_fields=(*update_fields, "updated_at"))
-                    elif form.cleaned_data.get("apply_themes") or form.cleaned_data.get(
-                        "apply_recommended_levels"
+            try:
+                with transaction.atomic():
+                    for animation in queryset.order_by("pk").prefetch_related(
+                        "themes", "recommended_levels"
                     ):
-                        animation.updated_at = timezone.now()
-                        animation.save(update_fields=("updated_at",))
+                        update_fields = []
+                        for field_name in scalar_fields:
+                            if not form.cleaned_data.get(f"apply_{field_name}"):
+                                continue
+                            setattr(animation, field_name, form.cleaned_data[field_name])
+                            update_fields.append(field_name)
 
-                    if form.cleaned_data.get("apply_themes"):
-                        animation.themes.set(form.cleaned_data["themes"])
-                    if form.cleaned_data.get("apply_recommended_levels"):
-                        animation.recommended_levels.set(
-                            form.cleaned_data["recommended_levels"]
+                        if update_fields:
+                            animation.save(update_fields=(*update_fields, "updated_at"))
+                        elif form.cleaned_data.get("apply_themes") or form.cleaned_data.get(
+                            "apply_recommended_levels"
+                        ):
+                            animation.updated_at = timezone.now()
+                            animation.save(update_fields=("updated_at",))
+
+                        if form.cleaned_data.get("apply_indicative_duration"):
+                            # Also repair slots whose duration was already entered
+                            # before automatic recalculation was introduced.
+                            recalculate_session_end_times(animation)
+                        if form.cleaned_data.get("apply_themes"):
+                            animation.themes.set(form.cleaned_data["themes"])
+                        if form.cleaned_data.get("apply_recommended_levels"):
+                            animation.recommended_levels.set(
+                                form.cleaned_data["recommended_levels"]
+                            )
+                        self.log_change(
+                            request,
+                            animation,
+                            "Modification groupée : " + ", ".join(applied_labels) + ".",
                         )
-                    self.log_change(
-                        request,
-                        animation,
-                        "Modification groupée : " + ", ".join(applied_labels) + ".",
+                        changed += 1
+            except ValidationError as error:
+                form.add_error(None, error)
+            else:
+                self.message_user(
+                    request,
+                    ngettext(
+                        "%d animation a été modifiée.",
+                        "%d animations ont été modifiées.",
+                        changed,
                     )
-                    changed += 1
-
-            self.message_user(
-                request,
-                ngettext(
-                    "%d animation a été modifiée.",
-                    "%d animations ont été modifiées.",
-                    changed,
+                    % changed,
+                    messages.SUCCESS,
                 )
-                % changed,
-                messages.SUCCESS,
-            )
-            return None
+                return None
 
         context = {
             **self.admin_site.each_context(request),

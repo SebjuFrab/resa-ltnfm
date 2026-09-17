@@ -1,5 +1,6 @@
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, router, transaction
 from django.db.models import F, Q, Sum, Value
 from django.db.models.functions import Coalesce, Greatest, Lower
 from django.utils import timezone
@@ -112,6 +113,41 @@ class Animation(models.Model):
 
     def __str__(self):
         return self.title
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if self._state.adding or (
+            update_fields is not None and "indicative_duration" not in update_fields
+        ):
+            return super().save(*args, **kwargs)
+
+        from .scheduling import recalculate_session_end_times
+
+        using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            previous = (
+                type(self).objects.using(using).select_for_update()
+                .filter(pk=self.pk).values_list("indicative_duration", flat=True).first()
+            )
+            result = super().save(*args, **kwargs)
+            if previous is not None and previous != self.indicative_duration:
+                recalculate_session_end_times(self, using=using)
+            return result
+
+    def clean(self):
+        super().clean()
+        if not self.pk or not self.indicative_duration or self.indicative_duration < 1:
+            return
+        previous = type(self).objects.filter(pk=self.pk).values_list(
+            "indicative_duration", flat=True
+        ).first()
+        if previous is not None and previous != self.indicative_duration:
+            from .scheduling import plan_session_end_times
+
+            try:
+                plan_session_end_times(self.sessions.order_by("pk"), self.indicative_duration)
+            except ValidationError as error:
+                raise ValidationError({"indicative_duration": error.messages}) from error
 
 
 class SessionQuerySet(models.QuerySet):
