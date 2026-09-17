@@ -619,6 +619,7 @@ class MailingTests(TestCase):
         self.assertEqual(result.sent_count, 3)
         for message in mail.outbox:
             self.assertEqual(message.cc, ["alex@example.test"])
+            self.assertEqual(str(message.message()["Cc"]), "alex@example.test")
             self.assertEqual(message.reply_to, ["alex@example.test"])
             expected_contact = (
                 "Louise Le Moing — 06 22 68 23 91"
@@ -627,6 +628,65 @@ class MailingTests(TestCase):
             )
             self.assertIn(expected_contact, message.body)
             self.assertNotIn("frab@example.test", message.body)
+
+    def test_existing_campaign_copies_the_actual_sender_instead_of_its_creator(self):
+        args = {
+            "subject": "Informations", "body_html": "<p>Informations pour tous.</p>",
+            "idempotency_key": "prepared-by-another-account",
+        }
+        campaign = create_mailing_campaign(**args, created_by=self.user)
+        actual_sender = get_user_model().objects.create_user(
+            username="actual-sender", email="actual@example.test"
+        )
+
+        result = create_and_send_mailing(**args, created_by=actual_sender)
+
+        self.assertEqual(result.campaign.pk, campaign.pk)
+        self.assertEqual(result.campaign.created_by_id, self.user.pk)
+        self.assertEqual(result.sent_count, 3)
+        for message in mail.outbox:
+            self.assertEqual(message.cc, [actual_sender.email])
+            self.assertEqual(str(message.message()["Cc"]), actual_sender.email)
+            self.assertEqual(message.reply_to, [actual_sender.email])
+
+    def test_sender_without_valid_copy_address_cannot_start_a_mailing(self):
+        for address in ("", "   ", "not-an-email"):
+            with self.subTest(address=address):
+                self.user.email = address
+                with self.assertRaisesMessage(ValueError, "compte administrateur"):
+                    create_and_send_mailing(
+                        subject="Informations", body_html="<p>Informations.</p>",
+                        created_by=self.user,
+                    )
+        self.assertFalse(MailingCampaign.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_sender_without_email_cannot_retry_or_change_campaign_status(self):
+        campaign = create_mailing_campaign(subject="Informations", body_html="<p>Texte.</p>")
+        campaign.deliveries.update(status=MailingDelivery.Status.FAILED)
+        self.user.email = ""
+
+        with self.assertRaisesMessage(ValueError, "compte administrateur"):
+            send_mailing_campaign(campaign, retry_failed=True, initiated_by=self.user)
+
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.status, MailingCampaign.Status.DRAFT)
+        self.assertIsNone(campaign.started_at)
+        self.assertFalse(campaign.deliveries.exclude(attempts=0).exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_admin_who_is_a_main_recipient_does_not_get_a_duplicate_copy(self):
+        self.user.email = self.first_registration.teacher.email
+        result = create_and_send_mailing(
+            subject="Informations", body_html="<p>Texte.</p>", created_by=self.user,
+        )
+        self.assertEqual(result.sent_count, 3)
+        for message in mail.outbox:
+            if message.to == [self.user.email]:
+                self.assertEqual(message.cc, [])
+                self.assertIsNone(message.message()["Cc"])
+            else:
+                self.assertEqual(message.cc, [self.user.email])
 
     def test_teacher_mailing_uses_reviewed_summary_and_frozen_class_variable(self):
         campaign = create_mailing_campaign(

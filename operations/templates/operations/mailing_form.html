@@ -7,6 +7,11 @@
   <p class="eyebrow">Communication de fin de préparation</p>
   <h1>Préparer le publipostage</h1>
   <p>Préparez deux messages distincts : l’un pour les responsables de groupe, l’autre pour les responsables des lieux de RDV.</p>
+  {% if sender_copy_email %}
+    <p class="alert alert-info"><strong>Copie automatique à votre compte :</strong> {{ sender_copy_email }}. Vous recevrez chaque mail envoyé, aux groupes comme aux responsables de lieu, y compris en sélection manuelle. Si vous êtes déjà destinataire principal, vous ne recevrez pas de doublon.</p>
+  {% else %}
+    <p class="alert alert-warning">{{ sender_copy_error }}</p>
+  {% endif %}
   {% if perms.catalogue.view_session and perms.inscriptions.view_reservation and perms.inscriptions.view_registration %}<p><a class="button button-secondary" href="{% url 'operations:final-reports' %}">Vérifier le récapitulatif général</a></p>{% endif %}
 
   <form method="post" novalidate id="mailing-form">
@@ -49,7 +54,7 @@
         </div>
         <p id="mailing-selection-count" role="status" aria-live="polite"></p>
         <button class="button button-quiet" type="button" id="mailing-clear-selection" hidden>Tout décocher</button>
-        <p class="alert alert-info">En sélection manuelle, seuls les responsables cochés reçoivent le publipostage. Votre compte reste en copie si son adresse est renseignée.</p>
+        <p class="alert alert-info">En sélection manuelle, seuls les responsables cochés sont destinataires. Votre compte administrateur reçoit aussi une copie de chaque mail.</p>
       </div>
       {% if preview %}
         <p class="total-panel" id="mailing-recipient-preview"><strong>{{ preview.teacher_count }}</strong> message(s) aux responsables de groupe et <strong>{{ preview.organizer_count }}</strong> récapitulatif(s) de lieu. Le bouton d’envoi détermine le public contacté.</p>

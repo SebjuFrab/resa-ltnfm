@@ -941,6 +941,17 @@ def _complete_campaign(campaign_id):
     return campaign, sent, failed
 
 
+def mailing_sender_email(user):
+    """Require a usable copy address for an explicitly identified staff sender."""
+    addresses = _validated_cc(getattr(user, "email", ""), "")
+    if not addresses:
+        raise ValueError(
+            "Renseignez une adresse e-mail valide dans votre compte administrateur "
+            "pour recevoir une copie de chaque message. L’envoi est bloqué."
+        )
+    return addresses[0]
+
+
 def send_mailing_campaign(campaign_or_id, *, retry_failed=False, initiated_by=None):
     """Synchronously send each pending delivery without ever resending a success."""
     campaign_id = (
@@ -948,7 +959,8 @@ def send_mailing_campaign(campaign_or_id, *, retry_failed=False, initiated_by=No
         if isinstance(campaign_or_id, MailingCampaign)
         else campaign_or_id
     )
-    cc_email = None if initiated_by is None else getattr(initiated_by, "email", "")
+    # Freeze the actual sender once for the whole batch, including explicit retries.
+    cc_email = None if initiated_by is None else mailing_sender_email(initiated_by)
     sender_contact = _sender_contact(initiated_by) if initiated_by is not None else None
     with transaction.atomic():
         campaign = MailingCampaign.objects.select_for_update().get(pk=campaign_id)
@@ -1015,6 +1027,8 @@ def create_and_send_mailing(
     recipient_selection=None,
 ):
     """Freeze and synchronously send one campaign, idempotently when a key is supplied."""
+    if created_by is not None:
+        mailing_sender_email(created_by)
     campaign = create_mailing_campaign(
         subject=subject,
         body_html=body_html,
@@ -1027,4 +1041,6 @@ def create_and_send_mailing(
         recipient_kinds=recipient_kinds,
         recipient_selection=recipient_selection,
     )
-    return send_mailing_campaign(campaign)
+    # An idempotent request may return a campaign prepared by another account.
+    # Copy the person who is sending now, not that campaign's original creator.
+    return send_mailing_campaign(campaign, initiated_by=created_by)

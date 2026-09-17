@@ -38,6 +38,7 @@ from catalogue.models import Animation, SchoolLevel, Session, Theme
 from communication.mailing import (
     MAILING_TEMPLATE_VARIABLES,
     create_and_send_mailing,
+    mailing_sender_email,
     preview_mailing_recipients,
 )
 from communication.models import EmailLog, MailingCampaign, MailingDelivery
@@ -1606,6 +1607,12 @@ def registration_resend(request, reference):
 @permission_required("communication.send_mailing", raise_exception=True)
 @require_http_methods(["GET", "POST"])
 def mailing_create(request):
+    try:
+        sender_copy_email = mailing_sender_email(request.user)
+        sender_copy_error = ""
+    except ValueError as error:
+        sender_copy_email = ""
+        sender_copy_error = str(error)
     send_actions = {
         "send": (
             MailingDelivery.RecipientKind.TEACHER,
@@ -1701,6 +1708,8 @@ def mailing_create(request):
             "editor_html": sanitize_rich_html(source_html),
             "organizer_editor_html": sanitize_rich_html(organizer_source_html),
             "mailing_template_variables": MAILING_TEMPLATE_VARIABLES,
+            "sender_copy_email": sender_copy_email,
+            "sender_copy_error": sender_copy_error,
             "idempotency_key": request.POST.get("idempotency_key") or uuid.uuid4().hex,
         },
     )

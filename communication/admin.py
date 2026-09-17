@@ -1,8 +1,8 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 
 from inscriptions.models import Registration
 
-from .mailing import send_mailing_campaign
+from .mailing import mailing_sender_email, send_mailing_campaign
 from .models import EmailLog, MailingCampaign, MailingDelivery
 from .services import _sender_contact, send_registration_email
 
@@ -161,6 +161,11 @@ class MailingCampaignAdmin(admin.ModelAdmin):
 
     @admin.action(description="Retenter les échecs", permissions=("send_mailing",))
     def retry_failed(self, request, queryset):
+        try:
+            mailing_sender_email(request.user)
+        except ValueError as error:
+            self.message_user(request, str(error), level=messages.ERROR)
+            return
         sent = failed = 0
         for campaign in queryset:
             result = send_mailing_campaign(

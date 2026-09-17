@@ -3,6 +3,7 @@ from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from communication.mailing import create_mailing_campaign
 from communication.models import MailingCampaign, MailingDelivery
 from inscriptions.models import Registration
 
@@ -50,6 +51,8 @@ class MailingSelectionViewTests(TestCase):
         self.assertEqual(form["recipient_mode"].value(), "all")
         self.assertFalse(form["teacher_recipients"].value())
         self.assertFalse(form["organizer_recipients"].value())
+        self.assertContains(response, "Copie automatique à votre compte")
+        self.assertEqual(response.context["sender_copy_email"], self.staff.email)
         for instruction in ("Imprimez ce courriel", "15 minutes", "Louise Le Moing"):
             self.assertIn(instruction, response.context["editor_html"])
             self.assertNotIn(instruction, response.context["organizer_editor_html"])
@@ -68,6 +71,7 @@ class MailingSelectionViewTests(TestCase):
                 self.assertEqual(response.status_code, 302)
                 self.assertEqual([message.to for message in mail.outbox], [[expected]])
                 self.assertEqual(mail.outbox[0].cc, [self.staff.email])
+                self.assertEqual(str(mail.outbox[0].message()["Cc"]), self.staff.email)
                 campaign = MailingCampaign.objects.latest("pk")
                 self.assertEqual(campaign.recipient_selection, [key])
                 detail = self.client.get(response.url)
@@ -157,4 +161,51 @@ class MailingSelectionViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(MailingCampaign.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_both_publics_always_copy_the_connected_account_for_all_and_manual_modes(self):
+        for mode in ("all", "selected"):
+            with self.subTest(mode=mode):
+                mail.outbox.clear()
+                response = self.client.post(
+                    self.url, self.payload(
+                        recipient_mode=mode,
+                        teacher_recipients=[self.teacher_key],
+                        organizer_recipients=[self.organizer_key],
+                    ),
+                )
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(len(mail.outbox), 2)
+                for message in mail.outbox:
+                    self.assertEqual(message.cc, [self.staff.email])
+                    self.assertEqual(str(message.message()["Cc"]), self.staff.email)
+
+    def test_account_without_email_gets_a_warning_and_cannot_send(self):
+        for address in ("", "invalid"):
+            with self.subTest(address=address):
+                self.staff.email = address
+                self.staff.save(update_fields=("email",))
+                response = self.client.get(self.url)
+                self.assertContains(response, "L’envoi est bloqué")
+                response = self.client.post(self.url, self.payload(recipient_mode="all"))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "adresse e-mail valide")
+                self.assertFalse(MailingCampaign.objects.exists())
+                self.assertEqual(len(mail.outbox), 0)
+
+    def test_admin_retry_without_email_is_reported_without_a_server_error(self):
+        campaign = create_mailing_campaign(subject="Informations", body_html="<p>Texte.</p>")
+        campaign.deliveries.update(status=MailingDelivery.Status.FAILED)
+        self.staff.email = ""
+        self.staff.save(update_fields=("email",))
+
+        response = self.client.post(
+            reverse("admin:communication_mailingcampaign_changelist"),
+            {"action": "retry_failed", "_selected_action": [str(campaign.pk)]},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "L’envoi est bloqué")
+        self.assertFalse(campaign.deliveries.exclude(attempts=0).exists())
         self.assertEqual(len(mail.outbox), 0)
