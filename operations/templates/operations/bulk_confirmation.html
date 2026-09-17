@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Valider les brouillons — LTNM{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Validation en lot</p>
+  <h1>Valider les brouillons</h1>
+  <p>Tous les brouillons sont concernés, indépendamment des filtres et de la pagination de la liste des groupes. Les inscriptions déjà confirmées ou annulées ne seront pas contactées.</p>
+  {% if selection_error %}
+    <p class="alert alert-warning" role="alert">{{ selection_error }}</p>
+    <a class="button" href="{% url 'operations:bulk-confirmation' %}">Recharger les brouillons</a>
+  {% else %}
+    <p class="total-panel"><strong>{{ ready_count }}</strong> groupe{{ ready_count|pluralize }} à valider et à contacter · <strong>{{ excluded_count }}</strong> à compléter ou à revérifier.</p>
+    {% if sender_error %}<p class="alert alert-warning" role="alert">{{ sender_error }}</p>{% else %}
+      <p><strong>Copie automatique de chaque mail à l’administrateur connecté :</strong> {{ sender_email }}.</p>
+    {% endif %}
+    <p>Chaque groupe reçoit son propre programme. Si le responsable utilise déjà l’adresse de l’administrateur, celui-ci reçoit le mail directement, sans doublon.</p>
+
+    <details>
+      <summary>Voir les {{ registrations|length }} groupes et les destinataires</summary>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Groupe / établissement</th><th>Jour</th><th>Destinataire</th><th>Animations</th><th>Vérification</th></tr></thead>
+          <tbody>
+            {% for registration in registrations %}
+              <tr>
+                <td><a href="{% url 'operations:registration-detail' registration.reference %}">{{ registration.group_code }}</a><br>{{ registration.institution.name }}</td>
+                <td>{{ registration.visit_date|date:"d/m/Y" }}</td>
+                <td>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}<br>{{ registration.teacher.email|default:"Adresse manquante" }}</td>
+                <td>{{ registration.batch_reservations|length }}</td>
+                <td>{{ registration.batch_issue|default:"Prêt à valider et à contacter" }}</td>
+              </tr>
+            {% empty %}<tr><td colspan="5">Aucun brouillon.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% if over_capacity %}
+      <div class="alert alert-warning">
+        <strong>Dépassements de jauge : ils restent autorisés après votre confirmation.</strong>
+        <ul>{% for session in over_capacity %}<li>{{ session.animation.title }} — {{ session.date|date:"d/m/Y" }} à {{ session.starts_at|time:"H:i" }} : {{ session.projected_capacity }} personnes / {{ session.max_capacity }} places après validation.</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if ready_count %}
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {{ form.selection }}
+        {{ form.non_field_errors }}
+        <h2>Personnaliser la confirmation</h2>
+        <p>{{ form.subject.label_tag }} {{ form.subject }} {{ form.subject.errors }}</p>
+        <p>{{ form.message_text.label_tag }} {{ form.message_text }} {{ form.message_text.errors }}<span class="helptext">{{ form.message_text.help_text }}</span></p>
+        <p><button type="submit" name="action" value="preview" class="button-secondary" formnovalidate>Actualiser l’aperçu sans envoyer</button></p>
+        {% if preview_html %}
+          <details open>
+            <summary>Aperçu pour {{ example.group_code }} — {{ example.teacher.email }}</summary>
+            <iframe title="Aperçu du mail de confirmation" sandbox="" srcdoc="{{ preview_html }}" style="width:100%;height:650px;border:1px solid #deddd7;"></iframe>
+          </details>
+        {% endif %}
+        <p>{{ form.confirm }} {{ form.confirm.label_tag }} {{ form.confirm.errors }}</p>
+        <p class="helptext">Laissez la page suivante ouverte jusqu’à la fin des envois. Les éventuelles erreurs seront affichées groupe par groupe.</p>
+        <div class="actions">
+          <button type="submit" name="action" value="start" {% if sender_error %}disabled{% endif %}>Valider les {{ ready_count }} brouillons et envoyer les mails</button>
+          <a class="button button-secondary" href="{% url 'operations:registration-list' %}">Annuler</a>
+        </div>
+      </form>
+    {% else %}
+      <p>Aucun groupe ne peut être validé et contacté pour le moment. Complétez les groupes signalés, puis rechargez cette page.</p>
+    {% endif %}
+  {% endif %}
+  <p><a href="{% url 'operations:registration-list' %}">Retour aux groupes</a></p>
+{% endblock %}

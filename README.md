@@ -97,6 +97,31 @@ La création interne suit trois écrans : informations du groupe, choix des anim
 
 Si le jour de visite est modifié, les nouvelles informations restent temporairement dans la session du salarié. L’ancienne date et l’ancien planning ne sont remplacés qu’au moment où au moins une séance du nouveau jour est enregistrée. Abandonner cette étape laisse donc l’inscription confirmée intacte.
 
+### Valider tous les brouillons et envoyer les confirmations
+
+Depuis **Groupes**, le bouton **Valider tous les brouillons et envoyer les mails**
+ouvre `/operations/groupes/valider-brouillons/`. Il concerne tous les brouillons,
+sans être limité aux filtres ou aux 50 groupes de la page courante.
+
+Avant de lancer le lot, l’administrateur peut modifier l’objet et le texte du mail,
+actualiser un aperçu, vérifier les destinataires puis cocher la confirmation.
+L’introduction et les consignes sont personnalisables pour ce lot ; la salutation,
+le programme individuel, le récapitulatif et la signature restent automatiques.
+Chaque validation envoie immédiatement le mail au responsable, avec l’administrateur
+connecté en copie visible (ou en destinataire direct si les adresses sont identiques).
+Une adresse valide sur le compte administrateur est donc nécessaire.
+
+Laissez la page de progression ouverte : elle traite les groupes un par un pour
+éviter une longue requête d’envoi. Une reprise ne renvoie pas les confirmations déjà
+traitées. Les groupes sans animation ou sans courriel valide restent en brouillon ;
+les groupes modifiés depuis l’aperçu doivent être revérifiés. Les dépassements de
+jauge sont signalés et acceptés par la confirmation explicite.
+
+Chaque résultat distingue l’inscription validée du mail réellement envoyé.
+Un échec SMTP est journalisé sur la fiche du groupe et ne remet pas l’inscription
+en brouillon. En cas d’interruption avec un résultat incertain, consulter cet
+historique avant un renvoi manuel. Aucun mail n’est envoyé à l’ouverture de l’aperçu.
+
 ### Publipostage final
 
 La page `/operations/publipostage/` permet de :

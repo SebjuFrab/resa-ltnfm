@@ -6,8 +6,12 @@
 {% block content %}
   <h1 style="margin:0;color:#2f3032;font-size:27px;line-height:1.15;">Votre inscription est confirmée</h1>
   <p style="margin:24px 0 8px;font-size:16px;line-height:1.6;">Bonjour <strong>{{ registration.teacher.first_name }} {{ registration.teacher.last_name }}</strong>,</p>
+  {% if custom_message %}
+    <div style="font-size:15px;line-height:1.5;">{{ custom_message|linebreaks }}</div>
+  {% else %}
   <p style="margin:0;font-size:15px;line-height:1.5;">Votre groupe est bien inscrit au salon <strong>La Terre est Notre Métier</strong>. Nous avons hâte de vous accueillir !</p>
   <div style="font-size:14px;line-height:1.5;">{% include "emails/includes/teacher_visit_instructions.html" %}</div>
+  {% endif %}
 
   {% include "emails/includes/teacher_group_summary.html" with group=group_summary %}
 

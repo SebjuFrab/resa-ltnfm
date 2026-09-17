@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import bulk_confirmation, views
 
 app_name = "operations"
 
@@ -13,6 +13,14 @@ urlpatterns = [
         name="animation-roster",
     ),
     path("groupes/", views.registration_list, name="registration-list"),
+    path(
+        "groupes/valider-brouillons/", bulk_confirmation.bulk_confirmation,
+        name="bulk-confirmation",
+    ),
+    path(
+        "groupes/valider-brouillons/envoyer/", bulk_confirmation.bulk_confirmation_send,
+        name="bulk-confirmation-send",
+    ),
     path("groupes/nouveau/", views.registration_create, name="registration-create"),
     path(
         "groupes/code/aleatoire/",

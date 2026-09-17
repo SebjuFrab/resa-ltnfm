@@ -149,37 +149,13 @@ def _registration_sender_contact(registration):
 
 
 @sensitive_variables("edit_url")
-def send_registration_email(
-    registration, kind, *, edit_url="", cc_email=None, sender_contact=None
+def render_registration_email(
+    registration, kind, *, edit_url="", sender_contact=None, subject=None, message_text=None
 ):
-    """Send and log one registration email without propagating SMTP failures.
-
-    ``edit_url`` is deliberately supplied by the caller: the raw edit token is
-    never stored and therefore cannot be reconstructed by this service.
-    """
+    """Render exactly the same content for the preview and the delivered email."""
     if kind not in TEMPLATE_NAMES:
         raise ValueError(f"Type de courriel inconnu : {kind}")
-
     recipient = registration.teacher.email
-    # When a staff member explicitly initiated the delivery, their address is
-    # frozen by ``schedule_registration_email`` and takes precedence.  Keep the
-    # historical creator fallback for direct confirmation sends.
-    if cc_email is None and kind == EmailLog.Kind.CONFIRMATION:
-        cc = _confirmation_cc(registration, recipient)
-    else:
-        cc = _validated_cc(cc_email, recipient)
-    if sender_contact is None:
-        sender_contact = (
-            _sender_contact(email=cc_email)
-            if cc_email is not None
-            else _registration_sender_contact(registration)
-        )
-    email_log = EmailLog.objects.create(
-        registration=registration,
-        kind=kind,
-        recipient=recipient,
-        status=EmailLog.Status.PENDING,
-    )
     group_summary = {
         "institution": registration.institution.name,
         "school_level": registration.school_level,
@@ -202,16 +178,55 @@ def send_registration_email(
         "total_count": registration.student_count + registration.chaperone_count,
         "contact_email": recipient,
         "edit_url": edit_url,
-        "sender_contact": sender_contact,
+        "sender_contact": sender_contact or _registration_sender_contact(registration),
         "edit_deadline": settings.REGISTRATION_EDIT_DEADLINE,
+        "custom_message": message_text,
     }
     template_name = TEMPLATE_NAMES[kind]
+    return (
+        SUBJECTS[kind] if subject is None else subject,
+        render_to_string(f"emails/{template_name}.txt", context),
+        render_to_string(f"emails/{template_name}.html", context),
+    )
+
+
+@sensitive_variables("edit_url")
+def send_registration_email(
+    registration, kind, *, edit_url="", cc_email=None, sender_contact=None,
+    subject=None, message_text=None,
+):
+    """Send and log one registration email without propagating SMTP failures.
+
+    ``edit_url`` is supplied by the caller: the raw token is never stored.
+    Custom confirmation text is plain text, escaped in the HTML alternative.
+    """
+    if kind not in TEMPLATE_NAMES:
+        raise ValueError(f"Type de courriel inconnu : {kind}")
+    recipient = registration.teacher.email
+    if cc_email is None and kind == EmailLog.Kind.CONFIRMATION:
+        cc = _confirmation_cc(registration, recipient)
+    else:
+        cc = _validated_cc(cc_email, recipient)
+    if sender_contact is None:
+        sender_contact = (
+            _sender_contact(email=cc_email)
+            if cc_email is not None
+            else _registration_sender_contact(registration)
+        )
+    email_log = EmailLog.objects.create(
+        registration=registration,
+        kind=kind,
+        recipient=recipient,
+        status=EmailLog.Status.PENDING,
+    )
 
     try:
-        text_body = render_to_string(f"emails/{template_name}.txt", context)
-        html_body = render_to_string(f"emails/{template_name}.html", context)
+        subject, text_body, html_body = render_registration_email(
+            registration, kind, edit_url=edit_url, sender_contact=sender_contact,
+            subject=subject, message_text=message_text,
+        )
         message = EmailMultiAlternatives(
-            subject=SUBJECTS[kind],
+            subject=subject,
             body=text_body,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[recipient],

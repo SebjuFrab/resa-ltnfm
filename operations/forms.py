@@ -86,6 +86,37 @@ class RegistrationSearchForm(forms.Form):
         self.fields["status"].choices = [("", "Tous")] + list(Registration.Status.choices)
 
 
+class BulkConfirmationForm(forms.Form):
+    selection = forms.CharField(widget=forms.HiddenInput)
+    subject = forms.CharField(label="Objet du mail", max_length=255)
+    message_text = forms.CharField(
+        label="Texte du mail",
+        max_length=20000,
+        widget=forms.Textarea(attrs={"rows": 16}),
+        help_text=(
+            "Le prénom et le nom du professeur, le programme, le récapitulatif du groupe "
+            "et la signature sont ajoutés automatiquement. Ce texte remplace "
+            "l’introduction et les consignes du mail habituel, uniquement pour ce lot."
+        ),
+    )
+    confirm = forms.BooleanField(
+        label=(
+            "J’ai vérifié les groupes et le message. Je confirme leurs inscriptions "
+            "et l’envoi immédiat des mails, y compris les éventuels dépassements de jauge."
+        ),
+    )
+
+    def __init__(self, *args, require_confirmation=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["confirm"].required = require_confirmation
+
+    def clean_subject(self):
+        subject = self.cleaned_data["subject"]
+        if "\n" in subject or "\r" in subject:
+            raise forms.ValidationError("L’objet doit tenir sur une seule ligne.")
+        return subject
+
+
 class ExportForm(forms.Form):
     class ExportType:
         REGISTRATIONS = "registrations"

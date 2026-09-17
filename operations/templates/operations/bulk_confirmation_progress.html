@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Validation et envoi en cours — LTNM{% endblock %}
+
+{% block content %}
+  <p class="eyebrow">Validation en lot</p>
+  <h1>Validation et envoi des confirmations</h1>
+  <p>Copie de chaque mail à l’administrateur : <strong>{{ sender_email }}</strong>.</p>
+  <p>Laissez cette page ouverte jusqu’à la fin. Un mail est envoyé immédiatement après la validation de chaque groupe.</p>
+  <noscript><p class="alert alert-warning">Activez JavaScript pour lancer le lot. Aucun groupe n’a encore été validé par cette page.</p></noscript>
+  <form id="bulk-confirmation-run" action="{% url 'operations:bulk-confirmation-send' %}" method="post">
+    {% csrf_token %}
+    <input type="hidden" name="token" value="{{ send_token }}">
+    <p id="bulk-progress-label" role="status" aria-live="polite">Prêt à traiter {{ registrations|length }} groupes…</p>
+    <progress id="bulk-progress" value="0" max="{{ registrations|length }}" aria-labelledby="bulk-progress-label" style="width:100%;"></progress>
+    <p id="bulk-error" class="alert alert-warning" role="alert" hidden></p>
+    <button type="button" id="bulk-resume" hidden>Reprendre les groupes restants</button>
+  </form>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Groupe / établissement</th><th>Destinataire</th><th>Résultat</th></tr></thead>
+      <tbody>
+        {% for registration in registrations %}
+          <tr data-bulk-reference="{{ registration.reference }}">
+            <td><a href="{% url 'operations:registration-detail' registration.reference %}" target="_blank" rel="noopener">{{ registration.group_code }}</a><br>{{ registration.institution.name }}</td>
+            <td>{{ registration.teacher.email }}</td>
+            <td data-bulk-status>En attente</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if excluded %}
+    <h2>Groupes non traités</h2>
+    <ul>{% for registration in excluded %}<li><a href="{% url 'operations:registration-detail' registration.reference %}">{{ registration.group_code }}</a> : {{ registration.batch_issue }}</li>{% endfor %}</ul>
+  {% endif %}
+  <p>Un échec d’envoi ne supprime pas la validation du groupe. Son historique de courriels est disponible sur sa fiche. Une reprise du lot ne renvoie pas les mails des groupes déjà validés.</p>
+  <p><a href="{% url 'operations:registration-list' %}">Retour aux groupes</a></p>
+  <script src="{% static 'js/bulk-confirmation.js' %}" defer></script>
+{% endblock %}

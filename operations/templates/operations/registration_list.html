@@ -18,9 +18,10 @@
 
   {% if draft_count %}
     <p class="alert alert-warning">
-      <strong>{{ draft_count }} groupe{{ draft_count|pluralize }} à programmer au total.</strong>
+      <strong>{{ draft_count }} groupe{{ draft_count|pluralize }} en brouillon au total.</strong>
       Filtrez sur « Brouillon » pour les retrouver, choisissez leurs animations puis confirmez leur inscription.
     </p>
+    <p><a class="button" href="{% url 'operations:bulk-confirmation' %}">Valider tous les brouillons et envoyer les mails</a></p>
   {% endif %}
 
   <form method="get" class="filters" aria-label="Filtres des groupes" data-auto-submit-filters>

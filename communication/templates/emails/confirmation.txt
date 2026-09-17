@@ -1,8 +1,8 @@
 Bonjour {{ registration.teacher.first_name }} {{ registration.teacher.last_name }},
 
-Votre groupe est bien inscrit au salon La Terre est Notre Métier. Nous avons hâte de vous accueillir !
+{% if custom_message %}{{ custom_message }}{% else %}Votre groupe est bien inscrit au salon La Terre est Notre Métier. Nous avons hâte de vous accueillir !
 
-{% include "emails/includes/teacher_visit_instructions.txt" %}
+{% include "emails/includes/teacher_visit_instructions.txt" %}{% endif %}
 
 {% include "emails/includes/teacher_group_summary.txt" with group=group_summary %}
 
