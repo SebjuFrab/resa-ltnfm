@@ -124,7 +124,10 @@ class OperationsViewTests(TestCase):
         registration = self.data["registration"]
         registration.level_comment = "Niveau d'origine : classe mixte"
         registration.comment = "Arrivée par l'entrée nord"
-        registration.save(update_fields=("level_comment", "comment", "updated_at"))
+        registration.special_needs = "Prévoir un accès adapté"
+        registration.save(
+            update_fields=("level_comment", "comment", "special_needs", "updated_at")
+        )
         session = self.data["session"]
         session.organizer = "Responsable du pôle"
         session.organizer_email = "pole@example.test"
@@ -138,13 +141,18 @@ class OperationsViewTests(TestCase):
         self.assertContains(response, "Pôle sols")
         self.assertContains(response, registration.group_code)
         self.assertContains(response, "classe mixte")
-        self.assertContains(response, "entrée nord")
+        self.assertNotContains(response, "À signaler")
+        self.assertNotContains(response, "entrée nord")
+        self.assertNotContains(response, "Prévoir un accès adapté")
         self.assertContains(response, "pole@example.test")
         self.assertContains(response, "Imprimer / enregistrer en PDF")
         self.assertEqual(response.context["location_count"], 1)
         self.assertEqual(response.context["group_count"], 1)
         self.assertEqual(response.context["participant_count"], 26)
         self.assertEqual(response.context["reservation_count"], 1)
+        registration.refresh_from_db()
+        self.assertEqual(registration.comment, "Arrivée par l'entrée nord")
+        self.assertEqual(registration.special_needs, "Prévoir un accès adapté")
 
     def test_final_report_can_be_filtered_by_location(self):
         self.client.force_login(self.staff)

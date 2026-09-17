@@ -7,7 +7,6 @@
       <th align="left">Établissement / niveau</th>
       <th align="left">Contact</th>
       <th align="right">Effectif</th>
-      <th align="left">À signaler</th>
     </tr>
   </thead>
   <tbody>
@@ -19,13 +18,12 @@
           <td valign="top">{{ group.institution }}{% if group.school_level %}<br><strong>{{ group.school_level }}</strong>{% endif %}{% if group.level_comment %}<br>{{ group.level_comment }}{% endif %}</td>
           <td valign="top">{{ group.teacher_name }}<br><a href="mailto:{{ group.teacher_email }}" style="color:#087f68;">{{ group.teacher_email }}</a>{% if group.teacher_phone %}<br>{{ group.teacher_phone }}{% endif %}</td>
           <td align="right" valign="top" style="white-space:nowrap;"><strong>{{ group.total_count }}</strong><br>{{ group.student_count }} + {{ group.chaperone_count }}</td>
-          <td valign="top">{% if group.special_needs %}<strong>Besoins :</strong> {{ group.special_needs }}{% endif %}{% if group.special_needs and group.comment %}<br>{% endif %}{% if group.comment %}{{ group.comment }}{% endif %}{% if not group.special_needs and not group.comment %}—{% endif %}</td>
         </tr>
       {% empty %}
-        <tr style="border-bottom:1px solid #deddd7;"><td valign="top"><strong>{{ session.date_label }}<br>{{ session.starts_at }}–{{ session.ends_at }}</strong><br>{{ session.animation }}</td><td colspan="5">Aucun groupe inscrit.</td></tr>
+        <tr style="border-bottom:1px solid #deddd7;"><td valign="top"><strong>{{ session.date_label }}<br>{{ session.starts_at }}–{{ session.ends_at }}</strong><br>{{ session.animation }}</td><td colspan="4">Aucun groupe inscrit.</td></tr>
       {% endfor %}
     {% empty %}
-      <tr><td colspan="6" style="padding:12px;">Aucun groupe inscrit.</td></tr>
+      <tr><td colspan="5" style="padding:12px;">Aucun groupe inscrit.</td></tr>
     {% endfor %}
   </tbody>
 </table>

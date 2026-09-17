@@ -129,6 +129,7 @@ class MailingCampaignAdmin(admin.ModelAdmin):
         "created_at",
         "started_at",
         "completed_at",
+        "recipient_selection",
     )
     inlines = (MailingDeliveryInline,)
     date_hierarchy = "created_at"

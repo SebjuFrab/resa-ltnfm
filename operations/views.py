@@ -28,6 +28,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -1619,10 +1620,7 @@ def mailing_create(request):
     }
     initial = {
         "subject": "Informations pratiques pour votre groupe — La Terre est Notre Métier",
-        "body_html": (
-            "<p>Vous trouverez ci-dessous le programme et les informations "
-            "utiles pour préparer la venue de votre groupe au salon.</p>"
-        ),
+        "body_html": render_to_string("emails/includes/teacher_visit_instructions.html"),
         "organizer_subject": ("Organisation de votre lieu — La Terre est Notre Métier"),
         "organizer_body_html": (
             "<p>Vous trouverez ci-dessous les horaires, les effectifs et les "
@@ -1632,12 +1630,18 @@ def mailing_create(request):
     form = MailingForm(request.POST or None, initial=initial)
     preview = None
     if request.method == "GET":
-        preview = preview_mailing_recipients()
+        preview = form.available_preview
     elif form.is_valid():
         data = form.cleaned_data
-        preview = preview_mailing_recipients(visit_date=data["visit_date"], family=data["family"])
+        try:
+            preview = preview_mailing_recipients(
+                visit_date=data["visit_date"], family=data["family"],
+                recipient_selection=data["recipient_selection"],
+            )
+        except ValueError as error:
+            form.add_error(None, str(error))
         action = request.POST.get("action", "")
-        if action in send_actions:
+        if preview is not None and action in send_actions:
             recipient_kinds = send_actions[action]
             has_missing_addresses = (
                 MailingDelivery.RecipientKind.TEACHER in recipient_kinds
@@ -1663,6 +1667,7 @@ def mailing_create(request):
                         family=data["family"],
                         idempotency_key=request.POST.get("idempotency_key") or None,
                         recipient_kinds=recipient_kinds,
+                        recipient_selection=data["recipient_selection"],
                     )
                 except ValueError as error:
                     form.add_error(None, str(error))

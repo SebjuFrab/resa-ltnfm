@@ -17,4 +17,5 @@ staticfiles/
 htmlcov/
 .coverage
 *.log
-
+/mail prof.docx
+~$*.docx

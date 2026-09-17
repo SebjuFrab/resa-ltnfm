@@ -9,6 +9,7 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.views.decorators.debug import sensitive_variables
 
 from inscriptions.models import RegistrationEvent
@@ -179,13 +180,25 @@ def send_registration_email(
         recipient=recipient,
         status=EmailLog.Status.PENDING,
     )
+    group_summary = {
+        "institution": registration.institution.name,
+        "school_level": registration.school_level,
+        "level_comment": registration.level_comment,
+        "group_code": str(getattr(registration, "group_code", "") or "").strip()
+        or registration.group_name,
+        "visit_date_label": date_format(registration.visit_date, "l j F Y"),
+        "student_count": registration.student_count,
+        "chaperone_count": registration.chaperone_count,
+        "total_count": registration.student_count + registration.chaperone_count,
+        "teacher_first_name": registration.teacher.first_name,
+        "teacher_last_name": registration.teacher.last_name,
+        "teacher_email": recipient,
+    }
     context = {
+        "group_summary": group_summary,
         "registration": registration,
         "reservations": _active_reservations(registration),
-        "group_code": (
-            str(getattr(registration, "group_code", "") or "").strip()
-            or registration.group_name
-        ),
+        "group_code": group_summary["group_code"],
         "total_count": registration.student_count + registration.chaperone_count,
         "contact_email": recipient,
         "edit_url": edit_url,

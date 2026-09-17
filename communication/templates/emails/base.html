@@ -42,7 +42,7 @@
               {% block content %}{% endblock %}
             </td>
           </tr>
-          {% include "emails/includes/footer.html" %}
+          {% block footer %}{% include "emails/includes/footer.html" %}{% endblock %}
         </table>
       </td>
     </tr>

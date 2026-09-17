@@ -6,6 +6,7 @@
   <p class="eyebrow">Publipostage envoyé</p>
   <h1>Publipostages de préparation</h1>
   <p>Créé le {{ campaign.created_at|date:"d/m/Y à H:i" }}{% if campaign.created_by %} par {{ campaign.created_by }}{% endif %}.</p>
+  {% if campaign.recipient_selection != None %}<p class="alert alert-info">Envoi limité aux responsables sélectionnés manuellement. Les autres responsables n’ont pas été contactés.</p>{% endif %}
   <div class="cards form-grid form-grid-2">
     {% if has_group_deliveries %}
     <article class="card">

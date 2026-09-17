@@ -54,6 +54,12 @@ MAILING_TEMPLATE_VARIABLES = (
             "par séance pour un responsable."
         ),
     },
+    {
+        "name": "niveau",
+        "token": "{{ niveau }}",
+        "label": "Classe",
+        "description": "Niveau de la classe du groupe ; vide pour un responsable de lieu.",
+    },
 )
 _ALLOWED_TEMPLATE_VARIABLES = frozenset(
     variable["name"] for variable in MAILING_TEMPLATE_VARIABLES
@@ -167,6 +173,7 @@ def _registration_snapshot(registration):
                 "ends_at": session.ends_at.strftime("%H:%M"),
                 "animation": session.animation.title,
                 "location": session.location,
+                "organizer": session.organizer,
                 "student_count": reservation.student_count,
                 "chaperone_count": reservation.chaperone_count,
                 "total_count": _total_count(
@@ -452,9 +459,69 @@ def _recipient_specs(*, visit_date=None, family=None):
     return specs, preview
 
 
-def preview_mailing_recipients(*, visit_date=None, family=None):
+def mailing_recipient_choices(*, visit_date=None, family=None):
+    """List eligible deliveries with enough context to distinguish each group."""
+    specs, preview = _recipient_specs(visit_date=visit_date, family=family)
+    choices = {kind: [] for kind in MailingDelivery.RecipientKind.values}
+    for spec in specs:
+        if spec.recipient_kind == MailingDelivery.RecipientKind.TEACHER:
+            group = spec.context_snapshot["registration"]
+            details = (
+                f"{group['institution']} · {group['group_code']} · "
+                f"{group['visit_date_label']}"
+            )
+        else:
+            details = ", ".join(
+                location["location"] for location in spec.context_snapshot["locations"]
+            )
+        label = f"{spec.recipient_name or 'Nom non renseigné'} — {spec.recipient} — {details}"
+        choices[spec.recipient_kind].append((spec.dedupe_key, label))
+    for values in choices.values():
+        values.sort(key=lambda choice: choice[1].casefold())
+    return choices, preview
+
+
+def _normalized_recipient_selection(selection):
+    if selection is None:
+        return None
+    if not isinstance(selection, (list, tuple, set, frozenset)) or any(
+        not isinstance(key, str) or not key or len(key) > 255 for key in selection
+    ):
+        raise ValueError("La sélection des destinataires n’est pas valide.")
+    return sorted(set(selection))
+
+
+def _select_recipient_specs(specs, selection):
+    if selection is None:
+        return specs
+    selected = set(selection)
+    if selected - {spec.dedupe_key for spec in specs}:
+        raise ValueError(
+            "Certains destinataires ne correspondent plus aux filtres ou n’ont plus "
+            "d’adresse valide. Actualisez la liste et vérifiez votre sélection."
+        )
+    return [spec for spec in specs if spec.dedupe_key in selected]
+
+
+def preview_mailing_recipients(*, visit_date=None, family=None, recipient_selection=None):
     """Return recipient counts for confirmed registrations matching the filters."""
-    _specs, preview = _recipient_specs(visit_date=visit_date, family=family)
+    specs, preview = _recipient_specs(visit_date=visit_date, family=family)
+    selection = _normalized_recipient_selection(recipient_selection)
+    if selection is not None:
+        specs = _select_recipient_specs(specs, selection)
+        preview = MailingRecipientPreview(
+            teacher_count=sum(
+                spec.recipient_kind == MailingDelivery.RecipientKind.TEACHER
+                for spec in specs
+            ),
+            organizer_count=sum(
+                spec.recipient_kind == MailingDelivery.RecipientKind.ORGANIZER
+                for spec in specs
+            ),
+            total_count=len(specs),
+            missing_teacher_email_count=0,
+            missing_organizer_email_count=0,
+        )
     return preview
 
 
@@ -517,6 +584,7 @@ def _same_idempotent_request(
     audience,
     visit_date,
     family_filter,
+    recipient_selection,
 ):
     return (
         campaign.subject == subject
@@ -526,6 +594,7 @@ def _same_idempotent_request(
         and campaign.audience == audience
         and campaign.visit_date == visit_date
         and campaign.family_filter == family_filter
+        and campaign.recipient_selection == recipient_selection
     )
 
 
@@ -540,9 +609,11 @@ def create_mailing_campaign(
     family=None,
     idempotency_key=None,
     recipient_kinds=None,
+    recipient_selection=None,
 ):
     """Freeze recipients and personalized context without sending messages."""
     recipient_kinds = _normalized_recipient_kinds(recipient_kinds)
+    recipient_selection = _normalized_recipient_selection(recipient_selection)
     audience = _audience_for_recipient_kinds(recipient_kinds)
     sends_to_groups = MailingDelivery.RecipientKind.TEACHER in recipient_kinds
     sends_to_organizers = MailingDelivery.RecipientKind.ORGANIZER in recipient_kinds
@@ -584,13 +655,17 @@ def create_mailing_campaign(
                 audience=audience,
                 visit_date=visit_date,
                 family_filter=family_filter,
+                recipient_selection=recipient_selection,
             ):
                 raise ValueError("Cette clé d’idempotence est déjà utilisée pour un autre envoi.")
             return existing
 
     specs, _preview = _recipient_specs(visit_date=visit_date, family=family)
+    specs = _select_recipient_specs(specs, recipient_selection)
     specs = [spec for spec in specs if spec.recipient_kind in recipient_kinds]
     if not specs:
+        if recipient_selection is not None:
+            raise ValueError("Sélectionnez au moins un responsable du public choisi.")
         raise ValueError("Aucun destinataire du public choisi ne correspond aux filtres.")
 
     try:
@@ -607,6 +682,7 @@ def create_mailing_campaign(
                 visit_date=visit_date,
                 family_filter=family_filter,
                 family_label=family_label,
+                recipient_selection=recipient_selection,
                 created_by=created_by,
             )
             MailingDelivery.objects.bulk_create(
@@ -636,6 +712,7 @@ def create_mailing_campaign(
             audience=audience,
             visit_date=visit_date,
             family_filter=family_filter,
+            recipient_selection=recipient_selection,
         ):
             raise ValueError(
                 "Cette clé d’idempotence est déjà utilisée pour un autre envoi."
@@ -675,8 +752,10 @@ def _template_values(delivery):
         first_name = str(registration.get("teacher_first_name", "") or "")
         last_name = str(registration.get("teacher_last_name", "") or "")
         registered_count = int(registration.get("total_count", 0) or 0)
+        school_level = str(registration.get("school_level", "") or "")
     else:
         first_name = ""
+        school_level = ""
         last_name = delivery.recipient_name
         registered_count = sum(
             int(session.get("total_count", 0) or 0)
@@ -687,6 +766,7 @@ def _template_values(delivery):
         "nom": str(last_name or ""),
         "programme": programme_lines,
         "nombre_inscrits": str(registered_count),
+        "niveau": school_level,
     }
 
 
@@ -932,6 +1012,7 @@ def create_and_send_mailing(
     family=None,
     idempotency_key=None,
     recipient_kinds=None,
+    recipient_selection=None,
 ):
     """Freeze and synchronously send one campaign, idempotently when a key is supplied."""
     campaign = create_mailing_campaign(
@@ -944,5 +1025,6 @@ def create_and_send_mailing(
         family=family,
         idempotency_key=idempotency_key,
         recipient_kinds=recipient_kinds,
+        recipient_selection=recipient_selection,
     )
     return send_mailing_campaign(campaign)

@@ -72,7 +72,6 @@
             <th>Niveau</th>
             <th>Enseignant</th>
             <th>Effectif</th>
-            <th>À signaler</th>
           </tr>
         </thead>
         <tbody>
@@ -86,7 +85,6 @@
               <td>{{ reservation.registration.school_level }}{% if reservation.registration.level_comment %}<br><span class="report-note">{{ reservation.registration.level_comment|linebreaksbr }}</span>{% endif %}</td>
               <td>{{ reservation.registration.teacher.first_name }} {{ reservation.registration.teacher.last_name }}<br><span class="report-note">{{ reservation.registration.teacher.phone }}<br>{{ reservation.registration.teacher.email }}</span></td>
               <td class="report-nowrap"><strong>{{ reservation.total_participant_count }}</strong><br><span class="report-note">{{ reservation.student_count }} + {{ reservation.chaperone_count }}</span></td>
-              <td>{% if reservation.registration.special_needs %}<strong>Besoins :</strong> {{ reservation.registration.special_needs|linebreaksbr }}{% endif %}{% if reservation.registration.special_needs and reservation.registration.comment %}<br>{% endif %}{% if reservation.registration.comment %}{{ reservation.registration.comment|linebreaksbr }}{% endif %}{% if not reservation.registration.special_needs and not reservation.registration.comment %}—{% endif %}</td>
             </tr>
           {% endfor %}
         </tbody>

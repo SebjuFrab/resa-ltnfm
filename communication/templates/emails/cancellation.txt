@@ -2,11 +2,8 @@ Bonjour {{ registration.teacher.first_name }} {{ registration.teacher.last_name 
 
 L'inscription suivante au salon La Terre est Notre Métier a bien été annulée :
 
-Établissement : {{ registration.institution.name }}
-Groupe : {{ registration.group_name }}
-Jour de visite : {{ registration.visit_date|date:"l j F Y" }}
-Email de contact : {{ contact_email }}
+{% include "emails/includes/teacher_group_summary.txt" with group=group_summary summary_title="Groupe annulé" %}
 
 Les places réservées ont été libérées.
 
-{% include "emails/includes/footer.txt" %}
+{% include "emails/includes/teacher_footer.txt" %}

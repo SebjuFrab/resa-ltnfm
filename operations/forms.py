@@ -6,6 +6,8 @@ from django.conf import settings
 from django.db.models import Q
 
 from catalogue.models import Animation, SchoolLevel, Session, Theme
+from communication.mailing import mailing_recipient_choices
+from communication.models import MailingDelivery
 from inscriptions.choices import department_form_choices
 from inscriptions.codes import generate_unique_group_code, normalize_group_code
 from inscriptions.models import GroupFamily, Institution, Registration, Reservation
@@ -561,6 +563,23 @@ class MailingForm(forms.Form):
     family = forms.ModelChoiceField(
         label="Famille", queryset=GroupFamily.objects.none(), required=False
     )
+    recipient_mode = forms.ChoiceField(
+        label="Destinataires de l’envoi",
+        choices=(
+            ("all", "Tous les responsables correspondant aux filtres"),
+            ("selected", "Choisir les responsables dans la liste"),
+        ),
+        initial="all",
+        required=False,
+    )
+    teacher_recipients = forms.MultipleChoiceField(
+        label="Responsables de groupe", required=False, widget=forms.CheckboxSelectMultiple
+    )
+    organizer_recipients = forms.MultipleChoiceField(
+        label="Responsables des lieux de RDV",
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
     subject = forms.CharField(
         label="Objet pour les responsables de groupe", max_length=255, required=False
     )
@@ -595,6 +614,19 @@ class MailingForm(forms.Form):
         self.fields["family"].queryset = GroupFamily.objects.filter(is_active=True).order_by(
             "sort_order", "name"
         )
+        self.available_preview = None
+        try:
+            visit_date = self.fields["visit_date"].clean(self["visit_date"].value())
+            family = self.fields["family"].clean(self["family"].value())
+        except forms.ValidationError:
+            return
+        choices, self.available_preview = mailing_recipient_choices(
+            visit_date=visit_date, family=family
+        )
+        self.fields["teacher_recipients"].choices = choices[MailingDelivery.RecipientKind.TEACHER]
+        self.fields["organizer_recipients"].choices = choices[
+            MailingDelivery.RecipientKind.ORGANIZER
+        ]
 
     def clean_visit_date(self):
         value = self.cleaned_data["visit_date"]
@@ -603,6 +635,22 @@ class MailingForm(forms.Form):
     def clean(self):
         cleaned = super().clean()
         action = self.data.get("action", "")
+        selection = cleaned.get("teacher_recipients", []) + cleaned.get("organizer_recipients", [])
+        mode = cleaned.get("recipient_mode") or ("selected" if selection else "all")
+        cleaned["recipient_mode"] = mode
+        cleaned["recipient_selection"] = selection if mode == "selected" else None
+        if mode == "selected":
+            target_fields = {
+                "send_groups": ("teacher_recipients",),
+                "send_organizers": ("organizer_recipients",),
+                "send": ("teacher_recipients", "organizer_recipients"),
+                "send_both": ("teacher_recipients", "organizer_recipients"),
+            }.get(action)
+            if target_fields:
+                selected_targets = [key for name in target_fields for key in cleaned.get(name, [])]
+                cleaned["recipient_selection"] = selected_targets
+                if not selected_targets:
+                    self.add_error(None, "Sélectionnez au moins un responsable du public choisi.")
         required_fields = []
         if action in {"send", "send_both", "send_groups"}:
             required_fields.extend(("subject", "body_html"))

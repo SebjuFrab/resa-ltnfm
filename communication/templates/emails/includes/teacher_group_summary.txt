@@ -1,0 +1,9 @@
+{{ summary_title|default:"Votre groupe" }}
+Établissement : {{ group.institution }}
+Classe : {{ group.school_level|default:"Non renseignée" }}{% if group.level_comment %} — {{ group.level_comment }}{% endif %}
+Code du groupe : {{ group.group_code }}
+Jour de visite : {{ group.visit_date_label }}
+Élèves : {{ group.student_count }}
+Accompagnateurs : {{ group.chaperone_count }}
+Effectif total : {{ group.total_count }} ({{ group.student_count }} élèves et {{ group.chaperone_count }} accompagnateurs)
+Contact enseignant·e : {{ group.teacher_last_name }} {{ group.teacher_first_name }}{% if group.teacher_email %} — {{ group.teacher_email }}{% endif %}

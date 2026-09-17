@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Publipostage final — LTNM{% endblock %}
 
@@ -18,8 +19,40 @@
         <p>{{ form.visit_date.label_tag }} {{ form.visit_date }} {{ form.visit_date.errors }}</p>
         <p>{{ form.family.label_tag }} {{ form.family }} {{ form.family.errors }}</p>
       </div>
+      <p><button class="button button-secondary" type="submit" name="action" value="preview">Actualiser la liste et les effectifs</button></p>
+      <p>{{ form.recipient_mode.label_tag }} {{ form.recipient_mode }} {{ form.recipient_mode.errors }}</p>
+      <div id="mailing-recipient-picker">
+        <p class="helptext">Cochez uniquement les responsables à contacter, par exemple pour un test. Un responsable de groupe apparaît une fois par groupe : chaque case correspond au récapitulatif de ce groupe. Les listes respectent les filtres ci-dessus.</p>
+        <p>
+          <label for="mailing-recipient-search">Rechercher un nom, une adresse, un groupe ou un lieu</label>
+          <input type="search" id="mailing-recipient-search" autocomplete="off">
+        </p>
+        <div class="form-grid form-grid-2">
+          <section aria-labelledby="mailing-teacher-heading">
+            <h2 id="mailing-teacher-heading">Responsables de groupe</h2>
+            {{ form.teacher_recipients.errors }}
+            <div class="mailing-recipient-list" data-recipient-list="teacher">
+              {% for option in form.teacher_recipients %}
+                <label class="mailing-recipient-option" data-recipient-option>{{ option.tag }} <span>{{ option.choice_label }}</span></label>
+              {% empty %}<p>Aucun responsable de groupe avec une adresse valide pour ces filtres.</p>{% endfor %}
+            </div>
+          </section>
+          <section aria-labelledby="mailing-organizer-heading">
+            <h2 id="mailing-organizer-heading">Responsables des lieux de RDV</h2>
+            {{ form.organizer_recipients.errors }}
+            <div class="mailing-recipient-list" data-recipient-list="organizer">
+              {% for option in form.organizer_recipients %}
+                <label class="mailing-recipient-option" data-recipient-option>{{ option.tag }} <span>{{ option.choice_label }}</span></label>
+              {% empty %}<p>Aucun responsable de lieu avec une adresse valide pour ces filtres.</p>{% endfor %}
+            </div>
+          </section>
+        </div>
+        <p id="mailing-selection-count" role="status" aria-live="polite"></p>
+        <button class="button button-quiet" type="button" id="mailing-clear-selection" hidden>Tout décocher</button>
+        <p class="alert alert-info">En sélection manuelle, seuls les responsables cochés reçoivent le publipostage. Votre compte reste en copie si son adresse est renseignée.</p>
+      </div>
       {% if preview %}
-        <p class="total-panel"><strong>{{ preview.teacher_count }}</strong> responsable(s) de groupe seront contactés et <strong>{{ preview.organizer_count }}</strong> récapitulatif(s) de lieu seront envoyés.</p>
+        <p class="total-panel" id="mailing-recipient-preview"><strong>{{ preview.teacher_count }}</strong> message(s) aux responsables de groupe et <strong>{{ preview.organizer_count }}</strong> récapitulatif(s) de lieu. Le bouton d’envoi détermine le public contacté.</p>
         {% if preview.missing_teacher_email_count %}<p class="alert alert-warning"><strong>{{ preview.missing_teacher_email_count }}</strong> groupe(s) confirmé(s) n’ont pas d’adresse de contact valide et ne recevront pas le message.</p>{% endif %}
         {% if preview.missing_organizer_email_count %}<p class="alert alert-warning"><strong>{{ preview.missing_organizer_email_count }}</strong> séance(s) réservée(s) n’ont pas d’adresse responsable. Elles ne pourront être envoyées que si une autre séance du même lieu possède un responsable.</p>{% endif %}
         {% if preview.missing_teacher_email_count or preview.missing_organizer_email_count %}<p>{{ form.confirm_missing }} {{ form.confirm_missing.label_tag }} {{ form.confirm_missing.errors }}</p>{% endif %}
@@ -87,11 +120,12 @@
     </fieldset>
     <div class="actions">
       <button type="submit" name="action" value="preview">Actualiser l’aperçu</button>
-      <button type="submit" name="action" value="send_groups">Envoyer aux responsables de groupe</button>
-      <button type="submit" name="action" value="send_organizers">Envoyer aux responsables des lieux</button>
-      <button type="submit" name="action" value="send_both">Envoyer aux deux publics</button>
+      <button type="submit" name="action" value="send_groups" data-selected-label="Envoyer aux responsables de groupe sélectionnés">Envoyer aux responsables de groupe</button>
+      <button type="submit" name="action" value="send_organizers" data-selected-label="Envoyer aux responsables des lieux sélectionnés">Envoyer aux responsables des lieux</button>
+      <button type="submit" name="action" value="send_both" data-selected-label="Envoyer à la sélection des deux publics">Envoyer aux deux publics</button>
     </div>
   </form>
+  <script src="{% static 'js/mailing-recipients.js' %}" defer></script>
 
   <script>
   (() => {

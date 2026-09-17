@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.template.loader import render_to_string
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -10,6 +11,7 @@ from catalogue.models import Animation, Category, SchoolLevel, Session
 from communication.mailing import (
     create_and_send_mailing,
     create_mailing_campaign,
+    mailing_recipient_choices,
     preview_mailing_recipients,
     send_mailing_campaign,
 )
@@ -193,6 +195,86 @@ class MailingTests(TestCase):
         self.assertEqual((by_family.teacher_count, by_family.organizer_count), (1, 1))
         self.assertEqual((by_slug.teacher_count, by_slug.organizer_count), (1, 1))
 
+    def test_manual_choices_are_named_filtered_and_preserve_distinct_group_programmes(self):
+        choices, preview = mailing_recipient_choices()
+        self.assertEqual(len(choices[MailingDelivery.RecipientKind.TEACHER]), 2)
+        self.assertEqual(len(choices[MailingDelivery.RecipientKind.ORGANIZER]), 1)
+        self.assertEqual(preview.total_count, 3)
+        labels = " ".join(label for values in choices.values() for _key, label in values)
+        for expected in (
+            "Prénom a", "prof-a@example.test", self.first_registration.group_code, "Pôle sols"
+        ):
+            self.assertIn(expected, labels)
+        self.assertNotIn("navet", labels)
+
+        filtered, _preview = mailing_recipient_choices(visit_date="2026-09-24")
+        self.assertEqual(len(filtered[MailingDelivery.RecipientKind.TEACHER]), 1)
+        self.assertIn(
+            self.second_registration.group_code,
+            filtered[MailingDelivery.RecipientKind.TEACHER][0][1],
+        )
+
+    def test_manual_mailing_sends_only_the_selected_group_and_keeps_sender_cc(self):
+        key = f"teacher:registration:{self.first_registration.pk}"
+        result = create_and_send_mailing(
+            subject="Essai ciblé", body_html="<p>Bonjour {{ prenom }}</p>",
+            created_by=self.user, recipient_selection=[key],
+        )
+
+        self.assertEqual(result.sent_count, 1)
+        self.assertEqual(result.campaign.recipient_selection, [key])
+        self.assertEqual([message.to for message in mail.outbox], [["prof-a@example.test"]])
+        self.assertEqual(mail.outbox[0].cc, [self.user.email])
+        self.assertIn(self.first_registration.group_code, mail.outbox[0].body)
+        self.assertNotIn(self.second_registration.group_code, mail.outbox[0].body)
+        self.assertEqual(result.campaign.deliveries.count(), 1)
+
+    def test_selected_organizer_keeps_all_groups_at_their_locations(self):
+        choices, _preview = mailing_recipient_choices()
+        key = choices[MailingDelivery.RecipientKind.ORGANIZER][0][0]
+        preview = preview_mailing_recipients(recipient_selection=[key])
+        self.assertEqual((preview.teacher_count, preview.organizer_count), (0, 1))
+        result = create_and_send_mailing(
+            organizer_subject="Essai lieu", organizer_body_html="<p>Récapitulatif.</p>",
+            recipient_kinds=(MailingDelivery.RecipientKind.ORGANIZER,),
+            recipient_selection=[key], created_by=self.user,
+        )
+        self.assertEqual(result.sent_count, 1)
+        self.assertEqual(mail.outbox[0].to[0].casefold(), "responsable@example.test")
+        self.assertIn(self.first_registration.group_code, mail.outbox[0].body)
+        self.assertIn(self.second_registration.group_code, mail.outbox[0].body)
+
+    def test_empty_unknown_and_out_of_filter_selections_never_send(self):
+        excluded_key = f"teacher:registration:{self.second_registration.pk}"
+        for selection in ([], ["unknown"], [excluded_key], "not-a-list"):
+            with self.subTest(selection=selection), self.assertRaises(ValueError):
+                create_and_send_mailing(
+                    subject="Essai", body_html="<p>Message.</p>",
+                    visit_date="2026-09-23", recipient_selection=selection,
+                )
+        self.assertFalse(MailingCampaign.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(preview_mailing_recipients(recipient_selection=[]).total_count, 0)
+
+    def test_manual_selection_is_part_of_idempotency_and_cannot_be_broadened(self):
+        first_key = f"teacher:registration:{self.first_registration.pk}"
+        other_key = f"teacher:registration:{self.second_registration.pk}"
+        args = {
+            "subject": "Essai", "body_html": "<p>Message.</p>",
+            "idempotency_key": "manual-recipient-selection", "recipient_selection": [first_key],
+        }
+        first = create_and_send_mailing(**args)
+        repeat = create_and_send_mailing(**{**args, "recipient_selection": [first_key, first_key]})
+        self.assertEqual(first.campaign.pk, repeat.campaign.pk)
+        self.assertEqual(len(mail.outbox), 1)
+        for selection in (None, [], [other_key], [first_key, other_key]):
+            with (
+                self.subTest(selection=selection),
+                self.assertRaisesMessage(ValueError, "autre envoi"),
+            ):
+                create_and_send_mailing(**{**args, "recipient_selection": selection})
+        self.assertEqual(len(mail.outbox), 1)
+
     def test_each_location_manager_receives_every_group_at_that_location(self):
         second_manager_session = Session.objects.create(
             animation=self.first_session.animation,
@@ -264,6 +346,59 @@ class MailingTests(TestCase):
             delivery.context_snapshot["sessions"][0]["groups"][0]["group_code"],
             self.first_registration.group_code,
         )
+
+    def test_organizer_recap_omits_notes_but_keeps_level_details(self):
+        registration = self.first_registration
+        registration.comment = "Arrivée prévue à 9 h"
+        registration.special_needs = "Prévoir un accès adapté"
+        registration.level_comment = "Classe mixte seconde et première"
+        registration.save(
+            update_fields=("comment", "special_needs", "level_comment", "updated_at")
+        )
+
+        result = create_and_send_mailing(
+            organizer_subject="Organisation des lieux",
+            organizer_body_html="<p>Voici les groupes attendus.</p>",
+            recipient_kinds=(MailingDelivery.RecipientKind.ORGANIZER,),
+            created_by=self.user,
+        )
+
+        self.assertEqual(result.sent_count, 1)
+        message = mail.outbox[0]
+        for body in (message.body, message.alternatives[0].content):
+            self.assertNotIn("À signaler", body)
+            self.assertNotIn(registration.comment, body)
+            self.assertNotIn(registration.special_needs, body)
+            self.assertIn(registration.level_comment, body)
+            self.assertIn(registration.group_code, body)
+            self.assertIn(registration.teacher.email, body)
+            self.assertIn("10:00–10:45", body)
+
+        # Older snapshots without a locations list use the same compact table.
+        snapshot = result.campaign.deliveries.get().context_snapshot.copy()
+        snapshot.pop("locations", None)
+        html_body = render_to_string(
+            "emails/mailing_organizer.html", {"snapshot": snapshot}
+        )
+        self.assertNotIn("À signaler", html_body)
+        self.assertNotIn(registration.comment, html_body)
+        self.assertNotIn(registration.special_needs, html_body)
+        self.assertIn(registration.level_comment, html_body)
+
+        registration.refresh_from_db()
+        self.assertEqual(registration.comment, "Arrivée prévue à 9 h")
+        self.assertEqual(registration.special_needs, "Prévoir un accès adapté")
+
+    def test_empty_organizer_tables_span_the_five_remaining_columns(self):
+        for sessions, colspan in (([], 5), ([{"groups": []}], 4)):
+            with self.subTest(sessions=sessions):
+                html_body = render_to_string(
+                    "emails/includes/location_group_table.html", {"sessions": sessions}
+                )
+                self.assertEqual(html_body.count("<th "), 5)
+                self.assertIn(f'colspan="{colspan}"', html_body)
+                self.assertNotIn("À signaler", html_body)
+                self.assertIn("Aucun groupe inscrit.", html_body)
 
     def test_default_preview_excludes_other_editions_and_anonymized_groups(self):
         Registration.objects.filter(pk=self.first_registration.pk).update(
@@ -363,8 +498,10 @@ class MailingTests(TestCase):
         )
         self.assertIn(self.first_registration.group_code, teacher_message.body)
         self.assertIn("Effectif total : 26", teacher_message.body)
-        self.assertIn("Email de contact : prof-a@example.test", teacher_message.body)
-        self.assertIn("Camille Durand — frab@example.test", teacher_message.body)
+        self.assertIn(
+            "Contact enseignant·e : Nom a Prénom a — prof-a@example.test", teacher_message.body
+        )
+        self.assertIn("Louise Le Moing — 06 22 68 23 91", teacher_message.body)
         self.assertIn("Variables : Prénom a|Nom a|26", teacher_message.body)
         self.assertNotIn("Message animation", teacher_message.body)
         self.assertIn(
@@ -393,7 +530,10 @@ class MailingTests(TestCase):
         self.assertNotIn("{{ prenom }}", teacher_message.body)
         for message in mail.outbox:
             self.assertEqual(message.reply_to, ["frab@example.test"])
-            self.assertIn("Camille Durand", message.alternatives[0].content)
+            expected_contact = (
+                "Camille Durand" if message is organizer_message else "Louise Le Moing"
+            )
+            self.assertIn(expected_contact, message.alternatives[0].content)
             self.assertNotIn("contact@example.test", message.alternatives[0].content)
             self.assertNotIn("02 00 00 00 00", message.body)
         teacher_html = teacher_message.alternatives[0].content
@@ -480,8 +620,38 @@ class MailingTests(TestCase):
         for message in mail.outbox:
             self.assertEqual(message.cc, ["alex@example.test"])
             self.assertEqual(message.reply_to, ["alex@example.test"])
-            self.assertIn("Alex — alex@example.test", message.body)
+            expected_contact = (
+                "Louise Le Moing — 06 22 68 23 91"
+                if message.to[0].startswith("prof-")
+                else "Alex — alex@example.test"
+            )
+            self.assertIn(expected_contact, message.body)
             self.assertNotIn("frab@example.test", message.body)
+
+    def test_teacher_mailing_uses_reviewed_summary_and_frozen_class_variable(self):
+        campaign = create_mailing_campaign(
+            subject="Classe du groupe",
+            body_html="<p>Classe personnalisée : {{ niveau }}</p>",
+            visit_date=date(2026, 9, 23),
+            recipient_kinds=(MailingDelivery.RecipientKind.TEACHER,),
+        )
+        SchoolLevel.objects.filter(pk=self.level.pk).update(label="Autre niveau")
+        Session.objects.filter(pk=self.first_session.pk).update(organizer="Autre responsable")
+        send_mailing_campaign(campaign)
+        message = mail.outbox[-1]
+        for body in (message.body, message.alternatives[0].content):
+            self.assertIn("Classe personnalisée : Lycée", body)
+            self.assertIn("Équipe sols", body)
+            self.assertNotIn("responsable@example.test", body.casefold())
+            self.assertNotIn("Autre niveau", body)
+            self.assertNotIn("Autre responsable", body)
+            self.assertIn("Contact enseignant·e", body)
+            self.assertIn("Nom a Prénom a", body)
+            self.assertIn("Louise Le Moing", body)
+            self.assertNotIn("{{ niveau }}", body)
+        html = message.alternatives[0].content
+        self.assertIn("font-size:12px;line-height:1.35;", html)
+        self.assertLess(html.index("Votre programme"), html.index("Récapitulatif de votre groupe"))
 
     def test_template_variables_escape_html_and_use_frozen_snapshot(self):
         teacher = self.first_registration.teacher

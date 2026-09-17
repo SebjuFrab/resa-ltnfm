@@ -93,6 +93,9 @@ class MailingCampaign(models.Model):
         "identifiant de famille filtrée", max_length=100, blank=True
     )
     family_label = models.CharField("famille filtrée", max_length=150, blank=True)
+    recipient_selection = models.JSONField(
+        "destinataires sélectionnés manuellement", default=None, null=True, blank=True
+    )
     status = models.CharField(
         "statut", max_length=10, choices=Status.choices, default=Status.DRAFT, db_index=True
     )

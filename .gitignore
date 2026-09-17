@@ -18,3 +18,5 @@ staticfiles/
 *.egg-info/
 var/
 /Copie de import groupe 2.xlsx
+/mail prof.docx
+~$*.docx

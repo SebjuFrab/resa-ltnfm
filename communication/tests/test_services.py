@@ -127,8 +127,9 @@ class EmailServiceTests(TestCase):
         self.registration.refresh_from_db()
         self.assertIn(self.registration.group_code, message.body)
         self.assertIn("Effectif total : 26", message.body)
-        self.assertIn("Email de contact : marie@example.test", message.body)
-        self.assertIn("alice.responsable@example.test", message.body)
+        self.assertIn("Contact enseignant·e : Dupont Marie — marie@example.test", message.body)
+        self.assertIn("Alice Responsable", message.body)
+        self.assertNotIn("alice.responsable@example.test", message.body)
         self.assertNotIn("Référence", message.body)
         self.assertNotIn(str(self.registration.reference), message.body)
         self.assertNotIn("Consulter ou modifier", message.body)
@@ -136,7 +137,8 @@ class EmailServiceTests(TestCase):
         self.assertIn("cid:ltnfm-logo", html_body)
         self.assertIn("#f3b709", html_body)
         self.assertIn("#14ad88", html_body)
-        self.assertIn("Email de contact", html_body)
+        self.assertIn("Contact enseignant·e", html_body)
+        self.assertNotIn("alice.responsable@example.test", html_body)
         self.assertNotIn(str(self.registration.reference), html_body)
         self._assert_branded_message(message)
 
@@ -156,6 +158,52 @@ class EmailServiceTests(TestCase):
 
         self.assertEqual(mail.outbox[0].to, ["marie@example.test"])
         self.assertEqual(mail.outbox[0].cc, ["creator@example.test"])
+
+    def test_teacher_recap_matches_word_comments_for_each_registration_email(self):
+        self.registration.group_name = "Nom de groupe à ne plus afficher"
+        self.registration.level_comment = "Classe mixte <niveau>"
+        self.registration.save(update_fields=("group_name", "level_comment"))
+        for send in (send_confirmation_email, send_modification_email, send_cancellation_email):
+            with self.subTest(send=send.__name__):
+                send(self.registration)
+                message = mail.outbox[-1]
+                html = message.alternatives[0].content
+                for body in (message.body, html):
+                    self.assertIn("Classe", body)
+                    self.assertIn("Lycée", body)
+                    self.assertIn("Code du groupe", body)
+                    self.assertEqual(body.count(self.registration.group_code), 1)
+                    self.assertNotIn(self.registration.group_name, body)
+                    self.assertIn("Contact enseignant·e", body)
+                    self.assertIn("Dupont Marie", body)
+                    self.assertIn("marie@example.test", body)
+                    self.assertNotIn("alice.responsable@example.test", body)
+                    self.assertIn("Louise Le Moing", body)
+                    self.assertIn("06 22 68 23 91", body)
+                self.assertIn("font-size:12px;line-height:1.35;", html)
+                self.assertIn("Classe mixte &lt;niveau&gt;", html)
+                self.assertNotIn("<niveau>", html)
+
+    def test_confirmation_includes_visit_instructions_from_word(self):
+        send_confirmation_email(self.registration)
+        message = mail.outbox[-1]
+        for body in (message.body, message.alternatives[0].content):
+            for instruction in (
+                "Imprimez ce courriel", "billet d’entrée", "15 minutes",
+                "places non occupées", "groupes en retard", "sécurité et de courtoisie",
+                "lundi 21 septembre", "pas par courriel", "À bientôt à Retiers",
+            ):
+                self.assertIn(instruction, body)
+
+    def test_organizer_with_only_an_email_is_not_exposed_in_teacher_mail(self):
+        session = self.registration.reservations.get().session
+        session.organizer = ""
+        session.save(update_fields=("organizer",))
+        send_confirmation_email(self.registration)
+        message = mail.outbox[-1]
+        for body in (message.body, message.alternatives[0].content):
+            self.assertNotIn("alice.responsable@example.test", body)
+            self.assertNotIn("Responsable de l’animation", body)
 
     def test_confirmation_does_not_duplicate_the_teacher_address_in_cc(self):
         creator = get_user_model().objects.create_user(
@@ -206,7 +254,7 @@ class EmailServiceTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         message = mail.outbox[0]
         self.assertIn("Effectif total : 26", message.body)
-        self.assertIn("Email de contact : marie@example.test", message.body)
+        self.assertIn("Contact enseignant·e : Dupont Marie — marie@example.test", message.body)
         self.assertNotIn("Référence", message.body)
         self.assertNotIn(str(self.registration.reference), message.body)
         self.assertNotIn("Consulter ou modifier", message.body)
@@ -256,7 +304,7 @@ class EmailServiceTests(TestCase):
         self.assertEqual(EmailLog.objects.count(), 1)
         self.assertEqual(mail.outbox[0].cc, ["validator@example.test"])
 
-    def test_all_registration_messages_share_the_senders_signature(self):
+    def test_all_teacher_messages_share_louises_contact_and_keep_sender_cc_and_reply(self):
         staff = get_user_model().objects.create_user(
             username="personal-contact",
             first_name="Camille",
@@ -271,11 +319,12 @@ class EmailServiceTests(TestCase):
                 message = mail.outbox[-1]
                 html = message.alternatives[0].content
                 self.assertIn(
-                    "Votre contact pour le salon : Camille Durand — camille.durand@example.test",
+                    "Votre contact pour le salon : Louise Le Moing — 06 22 68 23 91",
                     message.body,
                 )
-                self.assertIn("Camille Durand", html)
-                self.assertIn("mailto:camille.durand@example.test", html)
+                self.assertIn("Louise Le Moing", html)
+                self.assertIn("tel:+33622682391", html)
+                self.assertNotIn("camille.durand@example.test", html)
                 self.assertNotIn("contact@example.test", html)
                 self.assertNotIn("02 00 00 00 00", message.body)
                 self.assertEqual(message.cc, [staff.email])
@@ -284,7 +333,7 @@ class EmailServiceTests(TestCase):
         self.assertEqual(footers[0], footers[1])
         self.assertEqual(footers[0], footers[2])
 
-    def test_signature_and_copy_are_frozen_before_transaction_commit(self):
+    def test_sender_copy_and_reply_are_frozen_before_transaction_commit(self):
         staff = get_user_model().objects.create_user(
             username="frozen-contact", first_name="Camille", email="before@example.test",
         )
@@ -297,11 +346,11 @@ class EmailServiceTests(TestCase):
         staff.save()
         callbacks[0]()
         message = mail.outbox[-1]
-        self.assertIn("Camille — before@example.test", message.body)
+        self.assertIn("Louise Le Moing — 06 22 68 23 91", message.body)
         self.assertEqual(message.cc, ["before@example.test"])
         self.assertEqual(message.reply_to, ["before@example.test"])
 
-    def test_sender_with_recipient_address_keeps_signature_without_duplicate_copy(self):
+    def test_sender_with_recipient_address_does_not_duplicate_copy(self):
         staff = get_user_model().objects.create_user(
             username="same-address", first_name="Contact", email="MARIE@example.test",
         )
@@ -311,16 +360,17 @@ class EmailServiceTests(TestCase):
             )
         self.assertEqual(mail.outbox[0].cc, [])
         self.assertEqual(mail.outbox[0].reply_to, ["MARIE@example.test"])
-        self.assertIn("Contact — MARIE@example.test", mail.outbox[0].body)
+        self.assertIn("Louise Le Moing — 06 22 68 23 91", mail.outbox[0].body)
 
-    def test_no_sender_address_uses_the_organization_contact(self):
+    def test_no_sender_address_keeps_teacher_contact_and_organization_reply_fallback(self):
         staff = get_user_model().objects.create_user(username="no-address")
         with self.captureOnCommitCallbacks(execute=True):
             schedule_registration_email(
                 self.registration, EmailLog.Kind.MODIFICATION, initiated_by=staff
             )
-        self.assertIn("Organisation du salon : contact@example.test", mail.outbox[0].body)
-        self.assertIn("02 00 00 00 00", mail.outbox[0].body)
+        self.assertIn("Louise Le Moing — 06 22 68 23 91", mail.outbox[0].body)
+        self.assertNotIn("Organisation du salon :", mail.outbox[0].body)
+        self.assertNotIn("02 00 00 00 00", mail.outbox[0].body)
         self.assertEqual(mail.outbox[0].reply_to, ["contact@example.test"])
 
     def test_cancellation_email_does_not_contain_an_edit_link(self):
@@ -328,7 +378,7 @@ class EmailServiceTests(TestCase):
 
         self.assertEqual(len(mail.outbox), 1)
         message = mail.outbox[0]
-        self.assertIn("Email de contact : marie@example.test", message.body)
+        self.assertIn("Contact enseignant·e : Dupont Marie — marie@example.test", message.body)
         self.assertNotIn("Référence", message.body)
         self.assertNotIn(str(self.registration.reference), message.body)
         self.assertNotIn("modifier mon inscription", message.body.lower())
